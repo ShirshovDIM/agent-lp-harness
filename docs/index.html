@@ -5,66 +5,155 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent LP with Verifiable Yield</title>
 <style>
-  :root { color-scheme: light; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f7f7f8; color: #1a1a1a; }
-  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
-  h1 { font-size: 1.9rem; margin-bottom: 6px; }
-  .sub { color: #555; font-size: 1.05rem; margin-bottom: 28px; }
-  h2 { font-size: 1.2rem; margin-top: 36px; }
-  table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: .95rem; }
-  th { background: #f0f0f2; }
-  td.num { font-variant-numeric: tabular-nums; }
-  .note { font-size: .88rem; color: #666; margin-top: 8px; }
-  ul { line-height: 1.55; }
-  a { color: #0b5cad; }
-  .badge { display: inline-block; background: #e8f0e8; color: #275e27; border-radius: 999px; padding: 2px 10px; font-size: .8rem; margin-left: 8px; vertical-align: middle; }
-  footer { margin-top: 48px; font-size: .85rem; color: #777; border-top: 1px solid #e2e2e2; padding-top: 16px; }
+  :root {
+    color-scheme: dark;
+    --bg: #0b0e14;
+    --panel: #121722;
+    --panel-2: #161d2b;
+    --line: #232c3f;
+    --text: #e8ecf4;
+    --muted: #97a3b8;
+    --accent: #6ee7c8;
+    --accent-2: #7aa5ff;
+    --warn: #ffd166;
+    --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background-image:
+      radial-gradient(900px 420px at 85% -10%, rgba(122,165,255,.14), transparent 60%),
+      radial-gradient(700px 380px at 0% 0%, rgba(110,231,200,.10), transparent 55%);
+    background-repeat: no-repeat;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 56px 22px 90px; }
+  header.hero { margin-bottom: 40px; }
+  h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.02em;
+       background: linear-gradient(92deg, #eef2fa 30%, #9fd8ff 70%, #6ee7c8);
+       -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--muted); font-size: 1.06rem; max-width: 62ch; line-height: 1.55; }
+  .badge { display: inline-block; border: 1px solid rgba(110,231,200,.35); color: var(--accent);
+           background: rgba(110,231,200,.07); border-radius: 999px; padding: 3px 12px;
+           font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; margin-top: 14px; }
+  h2 { font-size: 1.12rem; margin: 46px 0 16px; color: var(--text);
+       display: flex; align-items: center; gap: 10px; }
+  h2::before { content: ""; width: 22px; height: 2px; border-radius: 2px;
+               background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 14px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+    display: flex; flex-direction: column; gap: 8px; min-height: 150px;
+    transition: transform .18s ease, border-color .18s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: #2e3a55; }
+  .card .pool { font-size: .84rem; color: var(--muted); letter-spacing: .02em; }
+  .card .ratio { font-family: var(--mono); font-size: 2.0rem; font-weight: 600;
+                 font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .card .ratio.ok { color: var(--accent); }
+  .card .ratio.ok2 { color: var(--accent-2); }
+  .card .ratio.pend { color: var(--warn); font-size: 1.5rem; }
+  .card .detail { font-family: var(--mono); font-size: .8rem; color: var(--muted);
+                  font-variant-numeric: tabular-nums; line-height: 1.5; }
+  .card .tag { margin-top: auto; font-size: .74rem; color: var(--muted);
+               border-top: 1px dashed var(--line); padding-top: 8px; }
+  .note { font-size: .86rem; color: var(--muted); margin-top: 12px; max-width: 72ch; line-height: 1.5; }
+  ul.list { list-style: none; padding: 0; display: grid; gap: 10px; }
+  ul.list li {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent-2);
+    border-radius: 10px; padding: 12px 16px; line-height: 1.5; box-shadow: 0 6px 18px rgba(0,0,0,.25);
+  }
+  ul.list.spec li { border-left-color: var(--accent); }
+  ul.list b, .card b { font-weight: 600; }
+  a { color: var(--accent-2); text-decoration: none; border-bottom: 1px dotted rgba(122,165,255,.5); }
+  a:hover { color: #a9c6ff; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .repro { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 4px; }
+  .repro .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+                padding: 16px; box-shadow: 0 8px 22px rgba(0,0,0,.3); font-size: .95rem; line-height: 1.55; }
+  .repro code { font-family: var(--mono); font-size: .82rem; color: var(--accent);
+                background: rgba(110,231,200,.07); border: 1px solid rgba(110,231,200,.18);
+                border-radius: 6px; padding: 2px 7px; display: inline-block; margin-top: 6px; }
+  footer { margin-top: 52px; font-size: .82rem; color: var(--muted);
+           border-top: 1px solid var(--line); padding-top: 18px; display: flex;
+           justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Agent LP with Verifiable Yield <span class="badge">verification &amp; trust infrastructure</span></h1>
-  <p class="sub">An autonomous concentrated-liquidity agent + a deterministic replay harness that
-  makes its numbers checkable: replay on collected on-chain data, calibrated against rewards
-  actually claimed by a live position.</p>
+  <header class="hero">
+    <h1>Agent LP with Verifiable Yield</h1>
+    <p class="sub">An autonomous concentrated-liquidity agent + a deterministic replay harness that
+    makes its numbers checkable: replay on collected on-chain data, calibrated against rewards
+    actually claimed by a live position.</p>
+    <span class="badge">verification &amp; trust infrastructure</span>
+  </header>
 
   <h2>Live calibration (model vs actually claimed)</h2>
-  <table>
-    <tr><th>Pool</th><th>Live window</th><th>Model</th><th>Actually claimed</th><th>Ratio</th></tr>
-    <tr><td>USDC-AERO CL2000 (Base)</td><td class="num">4 days, live position</td><td class="num">1.0806 AERO</td><td class="num">1.0735 AERO</td><td class="num"><b>1.0066</b></td></tr>
-    <tr><td>WETH-USDC CL50 (Base)</td><td class="num">live position</td><td class="num" colspan="2">calibrated in-report</td><td class="num"><b>0.9924</b></td></tr>
-    <tr><td>CELO/USDm fee=100 (Celo)</td><td class="num">first report published</td><td colspan="2">live calibration arrives with the Celo pilot</td><td class="num">—</td></tr>
-  </table>
+  <div class="cards">
+    <div class="card">
+      <div class="pool">USDC-AERO CL2000 · Base</div>
+      <div class="ratio ok">1.0066</div>
+      <div class="detail">model 1.0806 AERO<br>claimed 1.0735 AERO<br>4-day live window</div>
+      <div class="tag">live position, per-claim journal</div>
+    </div>
+    <div class="card">
+      <div class="pool">WETH-USDC CL50 · Base</div>
+      <div class="ratio ok2">0.9924</div>
+      <div class="detail">live position<br>calibrated in-report</div>
+      <div class="tag">live position, per-claim journal</div>
+    </div>
+    <div class="card">
+      <div class="pool">CELO/USDm fee=100 · Celo</div>
+      <div class="ratio pend">first report</div>
+      <div class="detail">30 days hourly on-chain data<br>113 seeded starts</div>
+      <div class="tag">live calibration arrives with the Celo pilot</div>
+    </div>
+  </div>
   <p class="note">Every number in the reports is verbatim from a seeded JSON output; the reports
   state their caveats explicitly (overlapping windows, market regime, cost stress variants).</p>
 
   <h2>What the loop already found</h2>
-  <ul>
-    <li>Tick-grid geometry dominates re-range economics: on a ~22%-step grid a "small-swap"
-        re-range is geometrically impossible — it equals the full swap on all 113 starts.</li>
-    <li>On a fine grid, no-swap modes win medians but cost p90 = 5–12 rewardless days per start.</li>
-    <li>Fee sensitivity is second-order: 0.05% → 0.6% moves median differences by &lt; 1 USD per 150 USD.</li>
+  <ul class="list">
+    <li>Tick-grid geometry dominates re-range economics: on a <span class="num">~22%</span>-step grid a
+        "small-swap" re-range is geometrically impossible — it equals the full swap on all
+        <span class="num">113</span> starts.</li>
+    <li>On a fine grid, no-swap modes win medians but cost <span class="num">p90 = 5–12</span> rewardless
+        days per start.</li>
+    <li>Fee sensitivity is second-order: <span class="num">0.05% → 0.6%</span> moves median differences
+        by <span class="num">&lt; 1 USD</span> per <span class="num">150 USD</span>.</li>
   </ul>
 
   <h2>Reproduce</h2>
-  <ul>
-    <li>Code: <a href="https://github.com/ShirshovDIM/agent-lp-harness">github.com/ShirshovDIM/agent-lp-harness</a></li>
-    <li>Reports: <a href="https://github.com/ShirshovDIM/agent-lp-harness/tree/main/reports">reports/</a>
-        (WETH-USDC, USDC-AERO, CELO/USDm)</li>
-    <li>One command, deterministic, seed 113 — no LLM in the measurement loop.</li>
-  </ul>
+  <div class="repro">
+    <div class="box">
+      Code · reports<br>
+      <a href="https://github.com/ShirshovDIM/agent-lp-harness">github.com/ShirshovDIM/agent-lp-harness</a><br>
+      <a href="https://github.com/ShirshovDIM/agent-lp-harness/tree/main/reports">reports/</a> —
+      WETH-USDC · USDC-AERO · CELO/USDm
+    </div>
+    <div class="box">
+      One command, deterministic<br>
+      seed <span class="num">113</span> · no LLM in the measurement loop
+      <code>python3 scripts/celo_fetch.py --days 30 &amp;&amp; python3 scripts/celo_report.py</code>
+    </div>
+  </div>
 
   <h2>Report format spec</h2>
-  <ul>
-    <li>Window (hours, price range, regime caveat)</li>
-    <li>Method (position, widths, costs incl. stress variants)</li>
-    <li>Statistics (medians p10/p90, tails P(&lt;−5%)/P(&lt;−10%), 113 seeded starts)</li>
-    <li>Calibration vs a live position (or an explicit "no live position yet")</li>
-    <li>Caveats — stated, not hidden</li>
+  <ul class="list spec">
+    <li><b>Window</b> — hours, price range, regime caveat</li>
+    <li><b>Method</b> — position, widths, costs incl. stress variants</li>
+    <li><b>Statistics</b> — medians p10/p90, tails P(&lt;−5%)/P(&lt;−10%), 113 seeded starts</li>
+    <li><b>Calibration</b> vs a live position (or an explicit "no live position yet")</li>
+    <li><b>Caveats</b> — stated, not hidden</li>
   </ul>
 
-  <footer>MIT license. Verification &amp; trust infrastructure for agent-driven liquidity.</footer>
+  <footer>
+    <span>MIT license</span>
+    <span>Verification &amp; trust infrastructure for agent-driven liquidity</span>
+  </footer>
 </main>
 </body>
 </html>
