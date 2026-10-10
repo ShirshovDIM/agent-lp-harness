@@ -41,6 +41,17 @@ Every report carries, verbatim from a JSON output:
 
 Any agent can emit a compatible report; the format is designed to be comparable across agents.
 
+## Data integrity
+
+| File | sha256 (first 16) |
+|---|---|
+| data/celo_pool_2026-10-10.json | 84d67a76d43ffd6c |
+| data/weth_rerange_modes_2026-10-09.json | ff676c615af15768 |
+| data/aero_rerange_modes_2026-10-10.json | dba1a56d58d1cf84 |
+
+Rebuild the Celo dataset with `scripts/celo_fetch.py --from <ISO> --to <ISO>` (public archive
+RPC, deterministic window) and re-run `scripts/celo_report.py` to match the hash above.
+
 ## Reproduce
 
 ```bash

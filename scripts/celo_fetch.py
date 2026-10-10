@@ -9,7 +9,7 @@ Pool 0x2d70cbabf4d8e61d5317b62cbe912935fd94e0fe: UniswapV3Factory(0xAfE208a311B2
 largest of the four fee tiers at selection time. token0/token1 are asserted at start.
 RPC https://forno.celo.org — public archive (historical eth_call verified).
 Kill switch: file STOP_CELO_POOL next to the script.
-USAGE: celo_fetch.py --days 30 [--backfill] (backfill if no checkpoint; otherwise tail)
+USAGE: celo_fetch.py [--days 30] [--from ISO|unix] [--to ISO|unix] (checkpointed, resumable)
 """
 import json
 import sys
@@ -101,10 +101,25 @@ def sample(block_hex):
             "feeGrowthGlobal0X128": int(g0, 16), "feeGrowthGlobal1X128": int(g1, 16)}
 
 
+def parse_ts(v):
+    if v.startswith("0x"):
+        return int(v, 16)
+    if v.isdigit():
+        return int(v)
+    from datetime import datetime, timezone
+    return int(datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp())
+
+
 def main():
     days = 30
     if "--days" in sys.argv:
         days = int(sys.argv[sys.argv.index("--days") + 1])
+    now = int(time.time())
+    if "--to" in sys.argv:
+        now = parse_ts(sys.argv[sys.argv.index("--to") + 1])
+    frm = None
+    if "--from" in sys.argv:
+        frm = parse_ts(sys.argv[sys.argv.index("--from") + 1])
     # assert the pool identity (token0/token1/symbols) — no guesses
     t0, t1 = addr_of(call_at(POOL, TOKEN0, "latest")), addr_of(call_at(POOL, TOKEN1, "latest"))
     assert sorted([t0.lower(), t1.lower()]) == sorted([CELO, CUSD]), f"unexpected tokens {t0} {t1}"
@@ -124,8 +139,7 @@ def main():
                 done.add(int(json.loads(line)["ts"]))
     print(f"{utc()} checkpoint: {len(done)} hourly samples", flush=True)
 
-    now = int(time.time())
-    start_hour = (now - days * 86400) // 3600 * 3600
+    start_hour = (frm if frm else (now - days * 86400)) // 3600 * 3600
     hours = list(range(start_hour, now // 3600 * 3600 + 1, 3600))
     todo = [h for h in hours if h not in done]
     print(f"{utc()} target {len(hours)} h, todo {len(todo)}", flush=True)
