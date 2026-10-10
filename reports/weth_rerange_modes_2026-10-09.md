@@ -1,9 +1,8 @@
 # WETH-USDC ±10 %: перестройка с обменом против «без обмена» (замер 09.10)
 
-Вопрос: зачем обменивать при перестройке, если можно встать с той же долей в другие окна границ?
-Детерминированный скрипт без LLM.
+Deterministic replay; no LLM. Read-only: the live position was not touched.
 
-- Скрипт: `scripts/weth_rerange_modes.py`.
+- Script: `scripts/weth_rerange_modes.py`.
 - Вывод: `data/weth_rerange_modes_2026-10-09.json` — числа ниже дословно оттуда.
 - Данные: часовые замеры пула Aerodrome WETH-USDC CL50 (F3) с 31.08 09:00Z по 09.10 18:00Z, 946 часов.
   Локальный коллектор дочитан с 05.10 до 09.10. ETH 2 447 → 2 486; в окне рост до 2 720 и падение 07–08.10 до 2 430.
