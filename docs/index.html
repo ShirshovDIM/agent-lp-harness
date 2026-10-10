@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent LP with Verifiable Yield</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f7f7f8; color: #1a1a1a; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 1.9rem; margin-bottom: 6px; }
+  .sub { color: #555; font-size: 1.05rem; margin-bottom: 28px; }
+  h2 { font-size: 1.2rem; margin-top: 36px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eee; font-size: .95rem; }
+  th { background: #f0f0f2; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .note { font-size: .88rem; color: #666; margin-top: 8px; }
+  ul { line-height: 1.55; }
+  a { color: #0b5cad; }
+  .badge { display: inline-block; background: #e8f0e8; color: #275e27; border-radius: 999px; padding: 2px 10px; font-size: .8rem; margin-left: 8px; vertical-align: middle; }
+  footer { margin-top: 48px; font-size: .85rem; color: #777; border-top: 1px solid #e2e2e2; padding-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agent LP with Verifiable Yield <span class="badge">verification &amp; trust infrastructure</span></h1>
+  <p class="sub">An autonomous concentrated-liquidity agent + a deterministic replay harness that
+  makes its numbers checkable: replay on collected on-chain data, calibrated against rewards
+  actually claimed by a live position.</p>
+
+  <h2>Live calibration (model vs actually claimed)</h2>
+  <table>
+    <tr><th>Pool</th><th>Live window</th><th>Model</th><th>Actually claimed</th><th>Ratio</th></tr>
+    <tr><td>USDC-AERO CL2000 (Base)</td><td class="num">4 days, live position</td><td class="num">1.0806 AERO</td><td class="num">1.0735 AERO</td><td class="num"><b>1.0066</b></td></tr>
+    <tr><td>WETH-USDC CL50 (Base)</td><td class="num">live position</td><td class="num" colspan="2">calibrated in-report</td><td class="num"><b>0.9924</b></td></tr>
+    <tr><td>CELO/USDm fee=100 (Celo)</td><td class="num">first report published</td><td colspan="2">live calibration arrives with the Celo pilot</td><td class="num">—</td></tr>
+  </table>
+  <p class="note">Every number in the reports is verbatim from a seeded JSON output; the reports
+  state their caveats explicitly (overlapping windows, market regime, cost stress variants).</p>
+
+  <h2>What the loop already found</h2>
+  <ul>
+    <li>Tick-grid geometry dominates re-range economics: on a ~22%-step grid a "small-swap"
+        re-range is geometrically impossible — it equals the full swap on all 113 starts.</li>
+    <li>On a fine grid, no-swap modes win medians but cost p90 = 5–12 rewardless days per start.</li>
+    <li>Fee sensitivity is second-order: 0.05% → 0.6% moves median differences by &lt; 1 USD per 150 USD.</li>
+  </ul>
+
+  <h2>Reproduce</h2>
+  <ul>
+    <li>Code: <a href="https://github.com/ShirshovDIM/agent-lp-harness">github.com/ShirshovDIM/agent-lp-harness</a></li>
+    <li>Reports: <a href="https://github.com/ShirshovDIM/agent-lp-harness/tree/main/reports">reports/</a>
+        (WETH-USDC, USDC-AERO, CELO/USDm)</li>
+    <li>One command, deterministic, seed 113 — no LLM in the measurement loop.</li>
+  </ul>
+
+  <h2>Report format spec</h2>
+  <ul>
+    <li>Window (hours, price range, regime caveat)</li>
+    <li>Method (position, widths, costs incl. stress variants)</li>
+    <li>Statistics (medians p10/p90, tails P(&lt;−5%)/P(&lt;−10%), 113 seeded starts)</li>
+    <li>Calibration vs a live position (or an explicit "no live position yet")</li>
+    <li>Caveats — stated, not hidden</li>
+  </ul>
+
+  <footer>MIT license. Verification &amp; trust infrastructure for agent-driven liquidity.</footer>
+</main>
+</body>
+</html>
