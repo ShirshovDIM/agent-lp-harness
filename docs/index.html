@@ -3,157 +3,935 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent LP with Verifiable Yield</title>
+<title>Agent LP with Verifiable Yield — agent-lp-harness</title>
+<meta name="description" content="An autonomous concentrated-liquidity agent and a deterministic replay harness. Every reward number is calibrated against what a live position actually claimed.">
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #0b0e14;
-    --panel: #121722;
-    --panel-2: #161d2b;
-    --line: #232c3f;
-    --text: #e8ecf4;
-    --muted: #97a3b8;
-    --accent: #6ee7c8;
-    --accent-2: #7aa5ff;
-    --warn: #ffd166;
-    --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background-image:
-      radial-gradient(900px 420px at 85% -10%, rgba(122,165,255,.14), transparent 60%),
-      radial-gradient(700px 380px at 0% 0%, rgba(110,231,200,.10), transparent 55%);
-    background-repeat: no-repeat;
-  }
-  main { max-width: 1040px; margin: 0 auto; padding: 56px 22px 90px; }
-  header.hero { margin-bottom: 40px; }
-  h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.02em;
-       background: linear-gradient(92deg, #eef2fa 30%, #9fd8ff 70%, #6ee7c8);
-       -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .sub { color: var(--muted); font-size: 1.06rem; max-width: 62ch; line-height: 1.55; }
-  .badge { display: inline-block; border: 1px solid rgba(110,231,200,.35); color: var(--accent);
-           background: rgba(110,231,200,.07); border-radius: 999px; padding: 3px 12px;
-           font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; margin-top: 14px; }
-  h2 { font-size: 1.12rem; margin: 46px 0 16px; color: var(--text);
-       display: flex; align-items: center; gap: 10px; }
-  h2::before { content: ""; width: 22px; height: 2px; border-radius: 2px;
-               background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-  .card {
-    background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    border: 1px solid var(--line); border-radius: 14px; padding: 18px 18px 14px;
-    box-shadow: 0 12px 34px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
-    display: flex; flex-direction: column; gap: 8px; min-height: 150px;
-    transition: transform .18s ease, border-color .18s ease;
-  }
-  .card:hover { transform: translateY(-2px); border-color: #2e3a55; }
-  .card .pool { font-size: .84rem; color: var(--muted); letter-spacing: .02em; }
-  .card .ratio { font-family: var(--mono); font-size: 2.0rem; font-weight: 600;
-                 font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
-  .card .ratio.ok { color: var(--accent); }
-  .card .ratio.ok2 { color: var(--accent-2); }
-  .card .ratio.pend { color: var(--warn); font-size: 1.5rem; }
-  .card .detail { font-family: var(--mono); font-size: .8rem; color: var(--muted);
-                  font-variant-numeric: tabular-nums; line-height: 1.5; }
-  .card .tag { margin-top: auto; font-size: .74rem; color: var(--muted);
-               border-top: 1px dashed var(--line); padding-top: 8px; }
-  .note { font-size: .86rem; color: var(--muted); margin-top: 12px; max-width: 72ch; line-height: 1.5; }
-  ul.list { list-style: none; padding: 0; display: grid; gap: 10px; }
-  ul.list li {
-    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent-2);
-    border-radius: 10px; padding: 12px 16px; line-height: 1.5; box-shadow: 0 6px 18px rgba(0,0,0,.25);
-  }
-  ul.list.spec li { border-left-color: var(--accent); }
-  ul.list b, .card b { font-weight: 600; }
-  a { color: var(--accent-2); text-decoration: none; border-bottom: 1px dotted rgba(122,165,255,.5); }
-  a:hover { color: #a9c6ff; }
-  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  .repro { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 4px; }
-  .repro .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-                padding: 16px; box-shadow: 0 8px 22px rgba(0,0,0,.3); font-size: .95rem; line-height: 1.55; }
-  .repro code { font-family: var(--mono); font-size: .82rem; color: var(--accent);
-                background: rgba(110,231,200,.07); border: 1px solid rgba(110,231,200,.18);
-                border-radius: 6px; padding: 2px 7px; display: inline-block; margin-top: 6px; }
-  footer { margin-top: 52px; font-size: .82rem; color: var(--muted);
-           border-top: 1px solid var(--line); padding-top: 18px; display: flex;
-           justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* ============ base ============ */
+:root{
+  --bg:#0d0d0b; --panel:#121210; --panel2:#17170f;
+  --line:#26251f; --line-soft:#1c1b16;
+  --text:#f2f0e8; --muted:#a29f92; --dim:#6d6b60;
+  --acc:#fcff52; --acc-soft:rgba(252,255,82,.12); --acc-line:rgba(252,255,82,.38);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:400 16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.wrap{max-width:1060px;margin:0 auto;padding:0 clamp(16px,4vw,28px)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1}
+a{color:var(--text);text-decoration:underline;text-decoration-color:var(--acc-line);text-underline-offset:3px}
+a:hover{color:var(--acc)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:2px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+section{border-top:1px solid var(--line-soft);padding:clamp(56px,8vw,84px) 0}
+h2{font-size:clamp(1.45rem,3vw,1.9rem);font-weight:650;letter-spacing:-.02em;margin:0 0 6px}
+.kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);margin:0 0 14px;display:flex;align-items:center;gap:10px}
+.kicker::before{content:"";width:9px;height:9px;background:var(--acc);display:inline-block;flex:none}
+.sec-sub{color:var(--muted);max-width:66ch;margin:0 0 30px;font-size:1.02rem}
+
+/* ============ hero ============ */
+header.hero{padding:clamp(64px,10vw,120px) 0 clamp(48px,7vw,80px)}
+header.hero .kicker{color:var(--muted)}
+h1{font-size:clamp(2.5rem,7vw,4.4rem);line-height:1.03;font-weight:700;letter-spacing:-.035em;margin:0 0 22px;max-width:14ch}
+h1 em{font-style:normal;color:var(--acc)}
+header.hero .sub{color:var(--muted);font-size:clamp(1.05rem,2vw,1.25rem);max-width:58ch;margin:0}
+
+/* ============ calibration cards ============ */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line)}
+.cal{background:var(--panel);padding:26px 26px 22px;min-height:238px;display:flex;flex-direction:column;gap:10px;
+  border-left:1px solid var(--line);transition:background .2s ease}
+.cal:hover{background:var(--panel2)}
+.cal .pool{font-family:var(--mono);font-size:.85rem;letter-spacing:.01em}
+.cal .chain{color:var(--dim);font-size:.8rem;margin-top:-6px}
+.cal .ratio{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:2.7rem;font-weight:600;letter-spacing:-.02em;line-height:1;color:var(--acc)}
+.cal .ratio small{display:block;font-size:.72rem;font-weight:400;color:var(--dim);letter-spacing:.08em;margin-top:8px}
+.cal .ratio.pend{color:var(--muted);font-size:1.5rem;letter-spacing:0;padding:14px 0 10px}
+.cal .detail{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.8rem;color:var(--muted);line-height:1.7}
+.cal .foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--line-soft);color:var(--dim);font-size:.76rem}
+
+/* ============ loop animation ============ */
+.loop-box{border:1px solid var(--line);background:var(--panel);padding:clamp(14px,2.5vw,26px);transition:opacity .5s ease}
+.loop-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.stages{list-style:none;display:flex;gap:22px;flex-wrap:wrap;padding:0;margin:0;
+  font-family:var(--mono);font-size:.74rem;letter-spacing:.05em;color:var(--dim)}
+.stages li{transition:color .3s ease;display:flex;gap:8px;align-items:baseline}
+.stages li::before{content:attr(data-n);color:var(--line);font-weight:700;transition:color .3s ease}
+.stages li.on{color:var(--text)}
+.stages li.on::before{color:var(--acc)}
+#loopBtn{font-family:var(--mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  background:none;border:1px solid var(--line);padding:7px 14px;cursor:pointer;transition:color .2s,border-color .2s}
+#loopBtn:hover{color:var(--acc);border-color:var(--acc-line)}
+.loop-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(240px,1fr);gap:clamp(16px,3vw,34px);align-items:stretch}
+#loopSvg{width:100%;height:auto;display:block}
+.loop-side{display:flex;flex-direction:column;gap:20px;justify-content:center;min-width:0}
+.meter-top{display:flex;justify-content:space-between;gap:12px;font-family:var(--mono);font-size:.76rem;color:var(--muted);margin-bottom:7px}
+.meter-top .v{color:var(--text);opacity:0;transition:opacity .5s ease}
+.meter.lock .meter-top .v{opacity:1}
+.meter.lock.m-model .meter-top .v{color:var(--acc)}
+.meter-track{height:4px;background:#22211b;overflow:hidden}
+.meter-fill{height:100%;width:0%;background:var(--text)}
+.meter.m-model .meter-fill{background:var(--acc)}
+.ratio{border-top:1px solid var(--line-soft);padding-top:18px;opacity:0;transform:translateY(4px);transition:opacity .6s ease,transform .6s ease}
+.ratio.show{opacity:1;transform:none}
+.ratio .k{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);display:block;margin-bottom:6px}
+.ratio .big{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:clamp(2.2rem,4vw,2.9rem);font-weight:600;color:var(--acc);line-height:1;letter-spacing:-.02em}
+.ratio .under{height:2px;width:0;background:var(--acc);margin-top:10px;transition:width .9s cubic-bezier(.2,.7,.2,1)}
+.ratio.show .under{width:64px}
+.ratio .sub{display:block;margin-top:10px;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.78rem;color:var(--muted)}
+.loop-cap{margin:14px 0 0;font-family:var(--mono);font-size:.72rem;line-height:1.75;color:var(--dim);max-width:100ch}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .cal,.meter-top .v,.ratio,.stages li,.loop-box{transition:none}
+}
+
+/* ============ explorer ============ */
+.controls{display:flex;gap:26px;flex-wrap:wrap;margin:0 0 18px}
+.seg{display:flex;flex-direction:column;gap:6px}
+.seg .seg-k{font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.seg .seg-opts{display:flex;flex-wrap:wrap}
+.seg button{font-family:var(--mono);font-size:.8rem;color:var(--muted);background:none;border:0;
+  padding:7px 13px;cursor:pointer;border-bottom:2px solid var(--line);transition:color .2s,border-color .2s}
+.seg button:hover{color:var(--text)}
+.seg button[aria-pressed="true"]{color:var(--acc);border-bottom-color:var(--acc)}
+.exmeta{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.76rem;color:var(--muted);margin:0 0 22px;line-height:1.9}
+.exmeta b{color:var(--text);font-weight:400}
+.tablewrap{overflow-x:auto;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;min-width:660px;background:var(--panel);font-size:.86rem}
+caption{text-align:left;font-family:var(--mono);font-size:.72rem;color:var(--dim);padding:10px 14px;border-bottom:1px solid var(--line-soft)}
+thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  font-weight:400;text-align:right;padding:0;border-bottom:1px solid var(--line);white-space:nowrap}
+thead th .thb{display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;
+  background:none;border:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;
+  padding:11px 14px;cursor:pointer;transition:color .15s}
+thead th .thb:hover{color:var(--text)}
+thead th[aria-sort] .thb{color:var(--acc)}
+thead th.nosort .thb{cursor:default}
+thead th.nosort .thb:hover{color:inherit}
+thead th.l .thb{justify-content:flex-start}
+span.thb{cursor:default}
+thead th .arr{font-size:.62rem;opacity:0}
+thead th[aria-sort="ascending"] .arr{opacity:1}
+thead th[aria-sort="descending"] .arr{opacity:1;transform:scaleX(-1)}
+th[scope="row"],td{padding:9px 14px;border-bottom:1px solid var(--line-soft)}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+th[scope="row"]{font-family:var(--mono);font-size:.82rem;text-align:left;white-space:nowrap;color:var(--text)}
+td{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.sub{font-family:var(--mono);color:var(--muted);text-align:left;font-size:.8rem}
+td.pos{color:#b9e28f}td.neg{color:#e28f8f}
+tbody tr{transition:background .12s ease}
+tbody tr:hover{background:rgba(252,255,82,.05)}
+.barcell{width:26%;min-width:150px}
+.bar{display:block;width:100%;height:22px}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 28px;margin:22px 0 0}
+.legend div{font-size:.8rem;line-height:1.55}
+.legend dt{font-family:var(--mono);font-size:.76rem;color:var(--text);float:left;clear:left;margin-right:10px}
+.legend dd{margin:0 0 2px;color:var(--muted);overflow:hidden}
+.exsrc{font-family:var(--mono);font-size:.72rem;color:var(--dim);margin:20px 0 0}
+
+/* ============ findings ============ */
+.findings{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.find{padding:28px 26px;border-left:1px solid var(--line)}
+.find:first-child{border-left:0}
+.find .big{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:clamp(1.7rem,3vw,2.2rem);font-weight:600;color:var(--acc);letter-spacing:-.02em;line-height:1.1;margin:0 0 6px}
+.find h3{font-size:1rem;font-weight:650;margin:0 0 8px;letter-spacing:-.01em}
+.find p{color:var(--muted);font-size:.88rem;margin:0}
+
+/* ============ reproduce + spec ============ */
+.repro{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line)}
+.repro>div{padding:26px}
+.repro>div:first-child{border-right:1px solid var(--line)}
+.repro ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:.88rem}
+.repro ul a{font-family:var(--mono);font-size:.8rem}
+.cmd{position:relative;margin-top:14px;background:#0a0a08;border:1px solid var(--line);padding:14px 16px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cmd code{font-family:var(--mono);font-size:.8rem;color:var(--acc);word-break:break-all}
+#copyBtn{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;flex:none;
+  background:none;border:1px solid var(--line);color:var(--muted);padding:6px 12px;cursor:pointer;transition:color .2s,border-color .2s}
+#copyBtn:hover{color:var(--acc);border-color:var(--acc-line)}
+#copyBtn.done{color:var(--acc);border-color:var(--acc)}
+.repro .note{font-family:var(--mono);font-size:.74rem;color:var(--dim);margin:14px 0 0;line-height:1.8}
+.spec{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);border-top:0}
+.spec>div{padding:20px 20px 22px;border-left:1px solid var(--line)}
+.spec>div:first-child{border-left:0}
+.spec dt{font-family:var(--mono);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);margin:0 0 8px}
+.spec dd{margin:0;color:var(--muted);font-size:.8rem;line-height:1.55}
+
+/* ============ footer ============ */
+footer{border-top:1px solid var(--line);padding:30px 0 44px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  font-family:var(--mono);font-size:.76rem;color:var(--dim)}
+footer a{color:var(--muted)}
+
+/* ============ responsive ============ */
+@media (max-width:900px){
+  .loop-grid{grid-template-columns:1fr}
+  .loop-side{flex-direction:row;flex-wrap:wrap;gap:24px}
+  .loop-side .meter{flex:1 1 180px}
+  .ratio{flex:1 1 100%;border-top:0;padding-top:4px}
+  .findings,.spec{grid-template-columns:1fr 1fr}
+  .find:nth-child(3){border-left:0}
+  .spec>div:nth-child(odd){border-left:0}
+}
+@media (max-width:640px){
+  .cards{grid-template-columns:1fr}
+  .cal{border-left:0;border-top:1px solid var(--line);min-height:0}
+  .cal:first-child{border-top:0}
+  .repro{grid-template-columns:1fr}
+  .repro>div:first-child{border-right:0;border-bottom:1px solid var(--line)}
+  .findings,.spec{grid-template-columns:1fr}
+  .find,.spec>div{border-left:0;border-top:1px solid var(--line)}
+  .find:first-child,.spec>div:first-child{border-top:0}
+  table{min-width:560px}
+}
 </style>
 </head>
 <body>
-<main>
+<a class="sr-only" href="#main">Skip to content</a>
+<div class="wrap">
+
+  <!-- ============ hero ============ -->
   <header class="hero">
-    <h1>Agent LP with Verifiable Yield</h1>
-    <p class="sub">An autonomous concentrated-liquidity agent + a deterministic replay harness that
-    makes its numbers checkable: replay on collected on-chain data, calibrated against rewards
-    actually claimed by a live position.</p>
-    <span class="badge">verification &amp; trust infrastructure</span>
+    <p class="kicker">verification &amp; trust infrastructure</p>
+    <h1>Agent LP with <em>Verifiable</em> Yield</h1>
+    <p class="sub">An autonomous concentrated-liquidity agent and a deterministic replay harness.
+    Every reward number is calibrated against what a live position actually claimed.</p>
   </header>
 
-  <h2>Live calibration (model vs actually claimed)</h2>
-  <div class="cards">
-    <div class="card">
-      <div class="pool">USDC-AERO CL2000 · Base</div>
-      <div class="ratio ok">1.0066</div>
-      <div class="detail">model 1.0806 AERO<br>claimed 1.0735 AERO<br>4-day live window</div>
-      <div class="tag">live position, per-claim journal</div>
-    </div>
-    <div class="card">
-      <div class="pool">WETH-USDC CL50 · Base</div>
-      <div class="ratio ok2">0.9924</div>
-      <div class="detail">live position<br>calibrated in-report</div>
-      <div class="tag">live position, per-claim journal</div>
-    </div>
-    <div class="card">
-      <div class="pool">CELO/USDm fee=100 · Celo</div>
-      <div class="ratio pend">first report</div>
-      <div class="detail">30 days hourly on-chain data<br>113 seeded starts</div>
-      <div class="tag">live calibration arrives with the Celo pilot</div>
-    </div>
-  </div>
-  <p class="note">Every number in the reports is verbatim from a seeded JSON output; the reports
-  state their caveats explicitly (overlapping windows, market regime, cost stress variants).</p>
+  <main id="main">
 
-  <h2>What the loop already found</h2>
-  <ul class="list">
-    <li>Tick-grid geometry dominates re-range economics: on a <span class="num">~22%</span>-step grid a
-        "small-swap" re-range is geometrically impossible — it equals the full swap on all
-        <span class="num">113</span> starts.</li>
-    <li>On a fine grid, no-swap modes win medians but cost <span class="num">p90 = 5–12</span> rewardless
-        days per start.</li>
-    <li>Fee sensitivity is second-order: <span class="num">0.05% → 0.6%</span> moves median differences
-        by <span class="num">&lt; 1 USD</span> per <span class="num">150 USD</span>.</li>
-  </ul>
-
-  <h2>Reproduce</h2>
-  <div class="repro">
-    <div class="box">
-      Code · reports<br>
-      <a href="https://github.com/ShirshovDIM/agent-lp-harness">github.com/ShirshovDIM/agent-lp-harness</a><br>
-      <a href="https://github.com/ShirshovDIM/agent-lp-harness/tree/main/reports">reports/</a> —
-      WETH-USDC · USDC-AERO · CELO/USDm
+  <!-- ============ 1 · live calibration ============ -->
+  <section id="calibration" aria-labelledby="cal-h">
+    <p class="kicker">01 · live calibration</p>
+    <h2 id="cal-h">Model vs actually claimed</h2>
+    <p class="sec-sub">The replay harness computes a reward stream from on-chain pool state; a live
+    position claims real rewards on the same window. The ratio of the two is the calibration.</p>
+    <div class="cards">
+      <article class="cal">
+        <div class="pool">USDC-AERO CL2000</div>
+        <div class="chain">Base · Aerodrome</div>
+        <div class="ratio num">1.0066<small>model ÷ claimed</small></div>
+        <div class="detail">model&nbsp;&nbsp;1.0806 AERO<br>claimed 1.0735 AERO<br>4-day live window</div>
+        <div class="foot">live position · per-claim journal</div>
+      </article>
+      <article class="cal">
+        <div class="pool">WETH-USDC CL50</div>
+        <div class="chain">Base · Aerodrome</div>
+        <div class="ratio num">0.9924<small>model ÷ claimed</small></div>
+        <div class="detail">live position<br>calibrated in-report</div>
+        <div class="foot">live position · per-claim journal</div>
+      </article>
+      <article class="cal">
+        <div class="pool">CELO/cUSD fee=100</div>
+        <div class="chain">Celo mainnet · UniswapV3</div>
+        <div class="ratio pend">first report published</div>
+        <div class="detail">live calibration arrives<br>with the Celo pilot</div>
+        <div class="foot">30 days hourly on-chain data · 113 seeded starts</div>
+      </article>
     </div>
-    <div class="box">
-      One command, deterministic<br>
-      seed <span class="num">113</span> · no LLM in the measurement loop
-      <code>python3 scripts/celo_fetch.py --days 30 &amp;&amp; python3 scripts/celo_report.py</code>
-    </div>
-  </div>
+  </section>
 
-  <h2>Report format spec</h2>
-  <ul class="list spec">
-    <li><b>Window</b> — hours, price range, regime caveat</li>
-    <li><b>Method</b> — position, widths, costs incl. stress variants</li>
-    <li><b>Statistics</b> — medians p10/p90, tails P(&lt;−5%)/P(&lt;−10%), 113 seeded starts</li>
-    <li><b>Calibration</b> vs a live position (or an explicit "no live position yet")</li>
-    <li><b>Caveats</b> — stated, not hidden</li>
-  </ul>
+  <!-- ============ 2 · verification loop (animated PoC) ============ -->
+  <section id="loop" aria-labelledby="loop-h">
+    <p class="kicker">02 · the verification loop</p>
+    <h2 id="loop-h">Replay against a live position</h2>
+    <p class="sec-sub">Hourly on-chain pool state flows in, the deterministic replay (seed 113)
+    accrues model rewards over in-range hours, and the actually claimed stream lands next to it.
+    Shown for the USDC-AERO live window.</p>
+    <div class="loop-box">
+      <div class="loop-head">
+        <ol class="stages" id="stages">
+          <li data-n="1">collect — on-chain hours</li>
+          <li data-n="2">replay — seed 113</li>
+          <li data-n="3">compare — vs claimed</li>
+        </ol>
+        <button id="loopBtn" type="button" aria-pressed="true">pause</button>
+      </div>
+      <div class="loop-grid">
+        <svg id="loopSvg" viewBox="0 0 640 288" role="img"
+             aria-label="Animated scene: a price line sweeps a 4-day window, hours inside the position range light up and accrue rewards; the model total 1.0806 AERO is compared with the claimed total 1.0735 AERO, ratio 1.0066."></svg>
+        <div class="loop-side">
+          <div class="meter m-model" id="mModel">
+            <div class="meter-top"><span>model · replay</span><span class="v num">1.0806 AERO</span></div>
+            <div class="meter-track"><div class="meter-fill" id="fModel"></div></div>
+          </div>
+          <div class="meter" id="mClaim">
+            <div class="meter-top"><span>claimed · live position</span><span class="v num">1.0735 AERO</span></div>
+            <div class="meter-track"><div class="meter-fill" id="fClaim"></div></div>
+          </div>
+          <div class="ratio" id="ratioBox">
+            <span class="k">model ÷ claimed</span>
+            <span class="big num">1.0066</span>
+            <div class="under"></div>
+            <span class="sub">1.0806 / 1.0735 · 4-day live window</span>
+          </div>
+        </div>
+      </div>
+      <p class="loop-cap">Reward model: L × ΔrewardGrowthGlobal / 2¹²⁸, in-range hours only · position
+      L and ticks withheld · seed 113, no LLM in the measurement loop.
+      Values verbatim from <span class="num">aero_rerange_modes_2026-10-10.json</span> (anchor block);
+      the price line is an illustrative sweep, the numbers are not.</p>
+    </div>
+  </section>
+
+  <!-- ============ 3 · measurement explorer ============ -->
+  <section id="explorer" aria-labelledby="ex-h">
+    <p class="kicker">03 · measurement explorer</p>
+    <h2 id="ex-h">Re-range modes and widths, 113 seeded starts</h2>
+    <p class="sec-sub">Each report replays the same window over 113 random starts (seed 113) and
+    reports medians with p10/p90 and the P(&lt;−5&nbsp;%) tail. Switch datasets, sort by any column.</p>
+    <div class="controls" id="exControls"></div>
+    <p class="exmeta" id="exMeta"></p>
+    <div class="tablewrap">
+      <table id="exTable">
+        <caption id="exCap"></caption>
+        <thead id="exHead"></thead>
+        <tbody id="exBody"></tbody>
+      </table>
+    </div>
+    <dl class="legend" id="exLegend"></dl>
+    <p class="exsrc" id="exSrc"></p>
+  </section>
+
+  <!-- ============ 4 · findings ============ -->
+  <section id="findings" aria-labelledby="find-h">
+    <p class="kicker">04 · what the loop already found</p>
+    <h2 id="find-h">Three results from measured windows</h2>
+    <div class="findings">
+      <article class="find">
+        <p class="big">~22 %</p>
+        <h3>Tick-grid geometry dominates</h3>
+        <p>On a ~22&nbsp;%-step grid (CL2000 = ×1.2214) a small-swap re-range is geometrically
+        impossible: mode B2 equals the full swap on all <span class="num">113</span> starts —
+        difference <span class="num">0.00</span> USD on both horizons.</p>
+      </article>
+      <article class="find">
+        <p class="big">5–12 days</p>
+        <h3>No-swap modes cost rewardless days</h3>
+        <p>On the fine CL50 grid (~0.5&nbsp;% step) no-swap modes win medians, but their p90 time
+        without rewards is <span class="num">5.08</span>–<span class="num">12.04</span> days per
+        start (B1, exit starts, 14/30&nbsp;d).</p>
+      </article>
+      <article class="find">
+        <p class="big">&lt; 1 USD</p>
+        <h3>Fee sensitivity is second-order</h3>
+        <p>Raising the swap-fee stress from <span class="num">0.05 %</span> to <span class="num">0.6 %</span>
+        moves the median differences by <span class="num">&lt; 1</span> USD per
+        <span class="num">150</span> USD position.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 5 · reproduce + report spec ============ -->
+  <section id="reproduce" aria-labelledby="rep-h">
+    <p class="kicker">05 · reproduce &amp; read</p>
+    <h2 id="rep-h">Check it yourself</h2>
+    <div class="repro">
+      <div>
+        <ul>
+          <li><a href="https://github.com/ShirshovDIM/agent-lp-harness">github.com/ShirshovDIM/agent-lp-harness</a></li>
+          <li><a href="https://github.com/ShirshovDIM/agent-lp-harness/blob/main/reports/aero_rerange_modes_2026-10-10.md">reports/aero_rerange_modes_2026-10-10.md</a></li>
+          <li><a href="https://github.com/ShirshovDIM/agent-lp-harness/blob/main/reports/weth_rerange_modes_2026-10-09.md">reports/weth_rerange_modes_2026-10-09.md</a></li>
+          <li><a href="https://github.com/ShirshovDIM/agent-lp-harness/blob/main/reports/celo_pool_2026-10-10.md">reports/celo_pool_2026-10-10.md</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="cmd">
+          <code id="cmdText">python3 scripts/celo_fetch.py --days 30 &amp;&amp; python3 scripts/celo_report.py</code>
+          <button id="copyBtn" type="button">copy</button>
+        </div>
+        <p class="note">one command · seed 113 · no LLM in the measurement loop · deterministic script, read-only</p>
+      </div>
+    </div>
+    <dl class="spec">
+      <div><dt>Window</dt><dd>hours, price path, market-regime caveat</dd></div>
+      <div><dt>Method</dt><dd>position, widths &amp; modes, costs incl. stress variants</dd></div>
+      <div><dt>Statistics</dt><dd>medians with p10/p90, tails P(&lt;−5&nbsp;%)/P(&lt;−10&nbsp;%), 113 seeded starts</dd></div>
+      <div><dt>Calibration</dt><dd>model ÷ actually claimed, or an explicit “no live position yet”</dd></div>
+      <div><dt>Caveats</dt><dd>stated, not hidden</dd></div>
+    </dl>
+  </section>
+
+  </main>
 
   <footer>
-    <span>MIT license</span>
+    <span>MIT license · <a href="https://github.com/ShirshovDIM/agent-lp-harness">agent-lp-harness</a></span>
     <span>Verification &amp; trust infrastructure for agent-driven liquidity</span>
   </footer>
-</main>
+
+</div>
+
+
+<script>
+(function(){
+'use strict';
+
+/* =====================================================================
+   Embedded measurements — numbers copied verbatim from
+   data/weth_rerange_modes_2026-10-09.json,
+   data/aero_rerange_modes_2026-10-10.json,
+   data/celo_pool_2026-10-10.json (+ its report table).
+   Values are kept as strings exactly as they appear in the sources;
+   parseFloat is used only for sorting and bar geometry.
+   ===================================================================== */
+var DATASETS = {
+  aero: {
+    tab: 'USDC-AERO CL2000 · Base',
+    controls: [
+      {k:'block', label:'data block', opts:[{id:'actual',label:'history'},{id:'mirror',label:'mirror · synthetic fall'}]},
+      {k:'h', label:'horizon', opts:[{id:'14d',label:'14 days'},{id:'30d',label:'30 days'}]}
+    ],
+    state: {block:'actual', h:'14d'},
+    cols: [
+      {key:'label', t:'mode', sort:'a'},
+      {key:'bar',   t:'p10 – p90', nosort:true},
+      {key:'med',   t:'median %'},
+      {key:'lo',    t:'p10 %'},
+      {key:'hi',    t:'p90 %'},
+      {key:'p5',    t:'P(<−5 %) share'}
+    ],
+    rows: {
+      actual: {
+        '14d': [
+          {label:'A',       med:'9.38',  lo:'4.29',  hi:'14.23', p5:'0.0'},
+          {label:'A_fix30', med:'9.64',  lo:'6.05',  hi:'13.67', p5:'0.0'},
+          {label:'B1',      med:'7.65',  lo:'1.74',  hi:'10.91', p5:'0.0'},
+          {label:'B1_1',    med:'8.19',  lo:'1.86',  hi:'10.74', p5:'0.0'},
+          {label:'B2',      med:'9.38',  lo:'4.29',  hi:'14.23', p5:'0.0'},
+          {label:'C',       med:'7.73',  lo:'1.88',  hi:'10.51', p5:'0.0'},
+          {label:'R70',     med:'8.0',   lo:'5.03',  hi:'12.19', p5:'0.0'}
+        ],
+        '30d': [
+          {label:'A',       med:'18.47', lo:'10.49', hi:'22.17', p5:'0.0'},
+          {label:'A_fix30', med:'18.67', lo:'9.5',   hi:'21.34', p5:'0.0'},
+          {label:'B1',      med:'7.58',  lo:'2.1',   hi:'24.37', p5:'0.0'},
+          {label:'B1_1',    med:'8.24',  lo:'3.2',   hi:'13.14', p5:'0.0'},
+          {label:'B2',      med:'18.47', lo:'10.49', hi:'22.17', p5:'0.0'},
+          {label:'C',       med:'7.72',  lo:'3.22',  hi:'12.51', p5:'0.0'},
+          {label:'R70',     med:'13.99', lo:'11.75', hi:'16.79', p5:'0.0'}
+        ]
+      },
+      mirror: {
+        '14d': [
+          {label:'A',       med:'-14.18', lo:'-25.04', hi:'-6.04', p5:'0.903'},
+          {label:'A_fix30', med:'-9.73',  lo:'-24.88', hi:'-4.09', p5:'0.832'},
+          {label:'B1',      med:'-15.76', lo:'-31.64', hi:'-3.31', p5:'0.823'},
+          {label:'B1_1',    med:'-15.02', lo:'-31.64', hi:'-3.48', p5:'0.823'},
+          {label:'B2',      med:'-14.18', lo:'-25.04', hi:'-6.04', p5:'0.903'},
+          {label:'C',       med:'-15.08', lo:'-31.63', hi:'-3.48', p5:'0.841'},
+          {label:'R70',     med:'-7.61',  lo:'-16.7',  hi:'-3.09', p5:'0.77'}
+        ],
+        '30d': [
+          {label:'A',       med:'-24.86', lo:'-30.38', hi:'-16.51', p5:'1.0'},
+          {label:'A_fix30', med:'-25.41', lo:'-27.92', hi:'-18.4',  p5:'0.991'},
+          {label:'B1',      med:'-32.01', lo:'-39.9',  hi:'-13.63', p5:'1.0'},
+          {label:'B1_1',    med:'-29.88', lo:'-39.65', hi:'-16.73', p5:'1.0'},
+          {label:'B2',      med:'-24.86', lo:'-30.38', hi:'-16.51', p5:'1.0'},
+          {label:'C',       med:'-30.1',  lo:'-39.64', hi:'-17.05', p5:'1.0'},
+          {label:'R70',     med:'-18.08', lo:'-20.29', hi:'-9.58',  p5:'1.0'}
+        ]
+      }
+    },
+    meta: {
+      actual: '951 hourly samples · <b>113 starts · seed 113</b> · position <b>150 USD</b> · grid 2000 ticks = ×1.2214 (~22 %) · AERO <b>0.476 → 0.8003</b>',
+      mirror: '951 hourly samples · <b>113 starts · seed 113</b> · position <b>150 USD</b> · grid 2000 ticks = ×1.2214 (~22 %) · mirror: AERO log-price reflected → <b>0.476 → 0.2831</b> (synthetic — sensitivity check, not history)'
+    },
+    cap: 'return vs 100 % USDC at window end, % — all 113 starts, seed 113',
+    legend: [
+      ['A','exit: close, swap to proportion, re-center (live pilot rule, width clamp(2·σ6h, 2–15 %) snapped to the 2000-tick grid)'],
+      ['A_fix30','same entry, fixed ±30 % width'],
+      ['B1','no swap: window on the held side, as many grid cells as A; wait for return'],
+      ['B1_1','no swap, one grid cell'],
+      ['B2','small swap: edge on the nearest own-side grid line — equals A on this grid'],
+      ['C','do nothing, wait for return'],
+      ['R70','reference ±70 %, no reranges']
+    ],
+    src: 'source: data/aero_rerange_modes_2026-10-10.json — blocks actual (history) / mirror (synthetic) · fields ret_med_pct / ret_p10_pct / ret_p90_pct / p_lt_m5'
+  },
+
+  weth: {
+    tab: 'WETH-USDC CL50 · Base',
+    controls: [
+      {k:'h', label:'horizon', opts:[{id:'14d',label:'14 days'},{id:'30d',label:'30 days'}]}
+    ],
+    state: {h:'14d'},
+    cols: [
+      {key:'label', t:'mode', sort:'a'},
+      {key:'bar',   t:'p10 – p90', nosort:true},
+      {key:'med',   t:'median %'},
+      {key:'lo',    t:'p10 %'},
+      {key:'hi',    t:'p90 %'},
+      {key:'p5',    t:'P(<−5 %) share'}
+    ],
+    rows: {
+      '14d': [
+        {label:'A',           med:'3.26', lo:'0.35', hi:'4.36', p5:'0.018'},
+        {label:'B1',          med:'3.74', lo:'0.35', hi:'4.16', p5:'0.0'},
+        {label:'B1_narrow',   med:'3.75', lo:'0.35', hi:'4.56', p5:'0.009'},
+        {label:'C',           med:'3.72', lo:'0.35', hi:'4.18', p5:'0.0'},
+        {label:'B2 a=1 %',    med:'3.68', lo:'0.35', hi:'4.2',  p5:'0.009'},
+        {label:'B2 a=2 %',    med:'3.73', lo:'0.35', hi:'4.22', p5:'0.009'},
+        {label:'B2 a=3 %',    med:'3.74', lo:'0.35', hi:'4.26', p5:'0.009'}
+      ],
+      '30d': [
+        {label:'A',           med:'5.01', lo:'-2.65', hi:'6.48', p5:'0.0'},
+        {label:'B1',          med:'5.32', lo:'3.25',  hi:'5.69', p5:'0.0'},
+        {label:'B1_narrow',   med:'6.27', lo:'1.95',  hi:'6.81', p5:'0.0'},
+        {label:'C',           med:'5.18', lo:'3.27',  hi:'5.69', p5:'0.0'},
+        {label:'B2 a=1 %',    med:'5.46', lo:'2.62',  hi:'5.76', p5:'0.0'},
+        {label:'B2 a=2 %',    med:'5.58', lo:'2.24',  hi:'5.95', p5:'0.0'},
+        {label:'B2 a=3 %',    med:'5.56', lo:'1.83',  hi:'6.06', p5:'0.0'}
+      ]
+    },
+    meta: {
+      h: '946 hourly samples · 2026-08-31 09:00Z → 2026-10-09 18:00Z · <b>113 starts · seed 113</b> · position <b>150 USD</b> · ETH <b>2446.6 → 2486.2</b>'
+    },
+    cap: 'return vs 100 % USDC at window end, % — all 113 starts, seed 113',
+    legend: [
+      ['A','exit: close, swap to proportion, re-center ±10 % (current live rule)'],
+      ['B1','no swap: full-width window adjacent to price on the held side, wait for return'],
+      ['B1_narrow','like B1, half-width window'],
+      ['B2 a=1–3 %','same width, price a % inside the edge; swap a small share only'],
+      ['C','do nothing, wait for return into the original window']
+    ],
+    src: 'source: data/weth_rerange_modes_2026-10-09.json · fields ret_med_pct / ret_p10_pct / ret_p90_pct / p_lt_m5'
+  },
+
+  celo: {
+    tab: 'CELO/cUSD fee=100 · Celo',
+    controls: [],
+    state: {},
+    cols: [
+      {key:'label', t:'width', sort:'a'},
+      {key:'sub',   t:'strategy', sort:'a'},
+      {key:'bar',   t:'p10 – p90', nosort:true},
+      {key:'med',   t:'median %'},
+      {key:'lo',    t:'p10 %'},
+      {key:'hi',    t:'p90 %'},
+      {key:'p5',    t:'P(<−5 %) %'}
+    ],
+    rows: [
+      {label:'±2 %',  sub:'hold',    _k:2,  med:'+0.49',  lo:'+0.49',  hi:'+0.49',  p5:'0'},
+      {label:'±2 %',  sub:'rerange', _k:2,  med:'-33.51', lo:'-38.18', hi:'-25.24', p5:'100'},
+      {label:'±5 %',  sub:'hold',    _k:5,  med:'+1.20',  lo:'+1.04',  hi:'+1.20',  p5:'0'},
+      {label:'±5 %',  sub:'rerange', _k:5,  med:'-13.75', lo:'-18.82', hi:'-6.42',  p5:'100'},
+      {label:'±10 %', sub:'hold',    _k:10, med:'+2.32',  lo:'+1.25',  hi:'+2.32',  p5:'0'},
+      {label:'±10 %', sub:'rerange', _k:10, med:'-2.29',  lo:'-10.32', hi:'+4.74',  p5:'23.0'},
+      {label:'±15 %', sub:'hold',    _k:15, med:'+3.36',  lo:'+1.29',  hi:'+3.36',  p5:'0'},
+      {label:'±15 %', sub:'rerange', _k:15, med:'+1.67',  lo:'-7.44',  hi:'+5.37',  p5:'22.1'},
+      {label:'±30 %', sub:'hold',    _k:30, med:'+4.93',  lo:'+1.27',  hi:'+5.99',  p5:'0'},
+      {label:'±30 %', sub:'rerange', _k:30, med:'+3.64',  lo:'-1.88',  hi:'+5.76',  p5:'2.7'}
+    ],
+    meta: {
+      x: '721 hourly samples · 2026-09-10 02:00Z → 2026-10-10 02:00Z · <b>113 starts · seed 113</b> · horizon <b>14 d</b> · position <b>150 USD</b> · CELO <b>0.0752 → 0.0962</b>'
+    },
+    cap: 'return vs 100 % cUSD (USDm) at window end, % — 113 starts, 14 days',
+    legend: [
+      ['hold','fixed window from entry'],
+      ['rerange','on exit: close at market, rebalance, re-center same width']
+    ],
+    src: 'source: reports/celo_pool_2026-10-10.md — table “return vs 100 % cUSD (USDm)”: median / p10 / p90 / P(<−5 %)'
+  }
+};
+
+/* ===================== explorer ===================== */
+var exState = {ds:'aero', sort:{key:null, dir:1}};
+
+function currentRows(){
+  var d = DATASETS[exState.ds];
+  if (exState.ds === 'celo') return d.rows;
+  if (exState.ds === 'aero') return d.rows[d.state.block][d.state.h];
+  return d.rows[d.state.h];
+}
+
+function el(tag, cls, txt){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+
+function buildControls(){
+  var host = document.getElementById('exControls');
+  host.textContent = '';
+  /* dataset switcher — always present */
+  var segDs = el('div','seg');
+  segDs.appendChild(el('span','seg-k','pool'));
+  var opts = el('div','seg-opts');
+  Object.keys(DATASETS).forEach(function(id){
+    var b = el('button', null, DATASETS[id].tab);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(exState.ds === id));
+    b.addEventListener('click', function(){
+      if (exState.ds === id) return;
+      exState.ds = id; exState.sort = {key:null, dir:1};
+      render();
+    });
+    opts.appendChild(b);
+  });
+  segDs.appendChild(opts);
+  host.appendChild(segDs);
+  /* contextual controls from the dataset definition */
+  DATASETS[exState.ds].controls.forEach(function(c){
+    var seg = el('div','seg');
+    seg.appendChild(el('span','seg-k', c.label));
+    var o = el('div','seg-opts');
+    c.opts.forEach(function(op){
+      var b = el('button', null, op.label);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(DATASETS[exState.ds].state[c.k] === op.id));
+      b.addEventListener('click', function(){
+        DATASETS[exState.ds].state[c.k] = op.id;
+        exState.sort = {key:null, dir:1};
+        render();
+      });
+      o.appendChild(b);
+    });
+    seg.appendChild(o);
+    host.appendChild(seg);
+  });
+}
+
+function metaHTML(){
+  var d = DATASETS[exState.ds];
+  if (exState.ds === 'aero') return d.meta[d.state.block];
+  if (exState.ds === 'weth') return d.meta.h;
+  return d.meta.x;
+}
+
+/* bar geometry: shared scale across the current view so rows are comparable */
+function barSVG(row, dom){
+  var NS = 'http://www.w3.org/2000/svg';
+  var d0 = dom[0], d1 = dom[1];
+  function X(v){ return Math.max(0, Math.min(100, (v - d0) / (d1 - d0) * 100)); }
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class','bar');
+  svg.setAttribute('viewBox','0 0 100 12');
+  svg.setAttribute('preserveAspectRatio','none');
+  svg.setAttribute('aria-hidden','true');
+  if (d0 < 0 && d1 > 0){
+    var z = document.createElementNS(NS,'line');
+    z.setAttribute('x1', X(0)); z.setAttribute('x2', X(0));
+    z.setAttribute('y1', 0); z.setAttribute('y2', 12);
+    z.setAttribute('stroke','#3a3930'); z.setAttribute('stroke-width','1');
+    z.setAttribute('vector-effect','non-scaling-stroke');
+    svg.appendChild(z);
+  }
+  var x1 = X(parseFloat(row.lo)), x2 = X(parseFloat(row.hi)), xm = X(parseFloat(row.med));
+  var box = document.createElementNS(NS,'rect');
+  box.setAttribute('x', x1); box.setAttribute('y', 3);
+  box.setAttribute('width', Math.max(0.6, x2 - x1)); box.setAttribute('height', 6);
+  box.setAttribute('fill','rgba(252,255,82,0.13)');
+  box.setAttribute('stroke','rgba(252,255,82,0.45)');
+  box.setAttribute('stroke-width','1');
+  box.setAttribute('vector-effect','non-scaling-stroke');
+  svg.appendChild(box);
+  var m = document.createElementNS(NS,'line');
+  m.setAttribute('x1', xm); m.setAttribute('x2', xm);
+  m.setAttribute('y1', 0.5); m.setAttribute('y2', 11.5);
+  m.setAttribute('stroke','#fcff52'); m.setAttribute('stroke-width','2');
+  m.setAttribute('vector-effect','non-scaling-stroke');
+  svg.appendChild(m);
+  return svg;
+}
+
+function buildTable(){
+  var d = DATASETS[exState.ds];
+  var rows = currentRows().slice();
+  var s = exState.sort;
+  if (s.key){
+    rows.sort(function(a,b){
+      var va, vb;
+      if (s.key === 'label' || s.key === 'sub'){
+        va = (s.key === 'label' && a._k != null) ? a._k : String(a[s.key]);
+        vb = (s.key === 'label' && b._k != null) ? b._k : String(b[s.key]);
+      } else { va = parseFloat(a[s.key]); vb = parseFloat(b[s.key]); }
+      if (va < vb) return -1 * s.dir;
+      if (va > vb) return 1 * s.dir;
+      return 0;
+    });
+  }
+  /* shared domain for all bars */
+  var lo = Infinity, hi = -Infinity;
+  rows.forEach(function(r){
+    lo = Math.min(lo, parseFloat(r.lo)); hi = Math.max(hi, parseFloat(r.hi));
+  });
+  var pad = (hi - lo) * 0.06 || 1;
+  var dom = [lo - pad, hi + pad];
+
+  var thead = document.getElementById('exHead');
+  thead.textContent = '';
+  var trh = document.createElement('tr');
+  d.cols.forEach(function(c){
+    var th = document.createElement('th');
+    th.setAttribute('scope','col');
+    th.className = (c.nosort ? 'nosort' : '') + (c.key === 'label' || c.key === 'sub' ? ' l' : '');
+    var btn;
+    if (c.nosort){
+      btn = el('span','thb');
+    } else {
+      btn = el('button','thb');
+      btn.type = 'button';
+    }
+    btn.appendChild(document.createTextNode(c.t));
+    var arr = el('span','arr','▲');
+    btn.appendChild(arr);
+    if (!c.nosort){
+      if (s.key === c.key) th.setAttribute('aria-sort', s.dir === 1 ? 'ascending' : 'descending');
+      btn.addEventListener('click', function(){
+        if (exState.sort.key === c.key) exState.sort.dir *= -1;
+        else exState.sort = {key:c.key, dir:1};
+        buildTable();
+      });
+    }
+    th.appendChild(btn);
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+
+  var tbody = document.getElementById('exBody');
+  tbody.textContent = '';
+  rows.forEach(function(r){
+    var tr = document.createElement('tr');
+    var th = el('th', null, r.label); th.setAttribute('scope','row');
+    tr.appendChild(th);
+    if ('sub' in r) tr.appendChild(el('td','sub', r.sub));
+    d.cols.forEach(function(c){
+      if (c.key === 'label' || c.key === 'sub') return;
+      if (c.key === 'bar'){
+        var td = document.createElement('td');
+        td.className = 'barcell';
+        td.appendChild(barSVG(r, dom));
+        tr.appendChild(td);
+        return;
+      }
+      var v = r[c.key];
+      var tdv = el('td', null, v);
+      if (parseFloat(v) > 0) tdv.className = 'pos';
+      else if (parseFloat(v) < 0) tdv.className = 'neg';
+      tr.appendChild(tdv);
+    });
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('exCap').textContent = d.cap;
+}
+
+function buildLegend(){
+  var d = DATASETS[exState.ds];
+  var lg = document.getElementById('exLegend');
+  lg.textContent = '';
+  d.legend.forEach(function(pair){
+    var box = document.createElement('div');
+    var dt = el('dt', null, pair[0]);
+    var dd = el('dd', null, pair[1]);
+    box.appendChild(dt); box.appendChild(dd);
+    lg.appendChild(box);
+  });
+  document.getElementById('exSrc').textContent = d.src;
+}
+
+function render(){
+  buildControls();
+  document.getElementById('exMeta').innerHTML = metaHTML();
+  buildTable();
+  buildLegend();
+}
+render();
+
+
+/* ===================== verification-loop animation =====================
+   Deterministic price sweep (mulberry32 seeded 113 — same idea as the
+   harness replays). Displayed numbers are only the verbatim finals:
+   model 1.0806 AERO, claimed 1.0735 AERO, ratio 1.0066. The price line
+   itself is illustrative; the caption says so. */
+var NS = 'http://www.w3.org/2000/svg';
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var N = 96, PX = 20, PW = 480, STEPX = PW / N;
+var BAND_LO = 84, BAND_HI = 140, YMIN = 30, YMAX = 190;
+var pts = (function(){
+  var rnd = mulberry32(113), y = 112, out = [];
+  for (var i = 0; i <= N; i++){
+    out.push(y);
+    y += (rnd() - 0.5) * 14 + (112 - y) * 0.03;
+    y = Math.max(YMIN, Math.min(YMAX, y));
+  }
+  return out;
+})();
+var inRange = pts.map(function(p){ return p >= BAND_LO && p <= BAND_HI; });
+
+var svg = document.getElementById('loopSvg');
+var ACC = '#fcff52', DIM = '#3c3b32', WAIT = '#1d1c17';
+var MONO = 'ui-monospace,Menlo,Consolas,monospace';
+function mk(tag, attrs, txt){
+  var e = document.createElementNS(NS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+/* static scene */
+svg.appendChild(mk('line',{x1:PX, x2:PX+PW, y1:222, y2:222, stroke:'#26251f','stroke-width':1}));
+svg.appendChild(mk('rect',{x:PX, y:BAND_LO, width:PW, height:BAND_HI-BAND_LO,
+  fill:'rgba(252,255,82,0.05)', stroke:'rgba(252,255,82,0.35)','stroke-dasharray':'3 4','stroke-width':1}));
+svg.appendChild(mk('text',{x:PX+6, y:16, fill:'#6d6b60','font-size':10,'font-family':MONO},'pool price'));
+svg.appendChild(mk('text',{x:PX+6, y:BAND_LO+13, fill:'#6d6b60','font-size':9,'font-family':MONO},'position range'));
+svg.appendChild(mk('text',{x:PX, y:284, fill:'#6d6b60','font-size':10,'font-family':MONO},'hourly pool state'));
+svg.appendChild(mk('text',{x:PX+PW, y:284, 'text-anchor':'end', fill:'#6d6b60','font-size':10,'font-family':MONO},'4-day live window'));
+var ticks = [], i;
+for (i = 0; i <= N; i++){
+  var tr_ = mk('rect',{x:PX + i*STEPX + 0.9, y:232, width:3.2, height:18, rx:1, fill:WAIT});
+  svg.appendChild(tr_); ticks.push(tr_);
+}
+var price = mk('path',{fill:'none', stroke:'#f2f0e8','stroke-width':1.4,'stroke-linejoin':'round','stroke-linecap':'round'});
+svg.appendChild(price);
+var dot = mk('circle',{r:3, fill:ACC, opacity:0});
+svg.appendChild(dot);
+
+/* meters / ratio / stages */
+var fModel = document.getElementById('fModel'),
+    fClaim = document.getElementById('fClaim'),
+    mModel = document.getElementById('mModel'),
+    mClaim = document.getElementById('mClaim'),
+    ratioBox = document.getElementById('ratioBox'),
+    stageEls = Array.prototype.slice.call(document.querySelectorAll('#stages li')),
+    loopBtn = document.getElementById('loopBtn'),
+    loopBox = document.querySelector('.loop-box');
+
+var CYCLE = 10500, HOLD = 1900, FADE = 600, TOTAL = CYCLE + HOLD + FADE;
+var P1 = 0.18, P2 = 0.78;                    /* phase boundaries, fraction of CYCLE */
+var CLAIMS = [0.20, 0.35, 0.50, 0.65, 0.82]; /* claim events, fraction of replay sweep */
+function ease(t){ return 1 - Math.pow(1 - t, 2.2); }
+
+function setStage(n){
+  stageEls.forEach(function(li, idx){ li.classList.toggle('on', idx === n - 1); });
+}
+var lastIdx = -1;
+function pathUpTo(idx){
+  if (idx === lastIdx) return;
+  lastIdx = idx;
+  var d = '';
+  for (var j = 0; j <= idx; j++){
+    d += (j ? 'L' : 'M') + (PX + j*STEPX).toFixed(1) + ' ' + pts[j].toFixed(1);
+  }
+  price.setAttribute('d', d);
+  dot.setAttribute('cx', PX + idx*STEPX);
+  dot.setAttribute('cy', pts[idx]);
+  for (var k = 0; k <= N; k++){
+    ticks[k].setAttribute('fill', k <= idx ? (inRange[k] ? ACC : DIM) : WAIT);
+  }
+}
+function finalState(){
+  setStage(3);
+  pathUpTo(N);
+  dot.setAttribute('opacity', 1);
+  fModel.style.width = '100%';
+  fClaim.style.width = '100%';
+  mModel.classList.add('lock');
+  mClaim.classList.add('lock');
+  ratioBox.classList.add('show');
+}
+function paint(tt){
+  /* tt: 0..1 across the full TOTAL */
+  if (tt * TOTAL >= CYCLE){          /* hold, then fade before restart */
+    finalState();
+    loopBox.style.opacity = tt * TOTAL >= CYCLE + HOLD ? '0.25' : '1';
+    return;
+  }
+  loopBox.style.opacity = '1';
+  if (tt < P1){
+    setStage(1);
+    var shown = Math.floor(tt / P1 * N);
+    for (var k = 0; k <= N; k++) ticks[k].setAttribute('fill', k <= shown ? DIM : WAIT);
+    price.setAttribute('d',''); lastIdx = -1; dot.setAttribute('opacity', 0);
+    fModel.style.width = '0%'; fClaim.style.width = '0%';
+    mModel.classList.remove('lock'); mClaim.classList.remove('lock'); ratioBox.classList.remove('show');
+  } else if (tt < P2){
+    setStage(2);
+    var s = ease((tt - P1) / (P2 - P1));
+    pathUpTo(Math.round(s * N));
+    dot.setAttribute('opacity', 1);
+    fModel.style.width = (s * 100).toFixed(1) + '%';
+    var done = CLAIMS.filter(function(c){ return c <= s; }).length;
+    fClaim.style.width = (done / CLAIMS.length * 100).toFixed(1) + '%';
+    mModel.classList.remove('lock'); mClaim.classList.remove('lock'); ratioBox.classList.remove('show');
+  } else {
+    finalState();
+  }
+}
+
+var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var playing = !reduced, t0 = null, rafId = null, resume = 0;
+
+function frame(ts){
+  if (t0 === null){ t0 = ts - resume; resume = 0; }
+  var tt = ((ts - t0) % TOTAL) / TOTAL;
+  paint(tt);
+  if (playing) rafId = requestAnimationFrame(frame);
+}
+function play(){
+  if (playing) return;
+  playing = true;
+  loopBtn.textContent = 'pause'; loopBtn.setAttribute('aria-pressed','true');
+  rafId = requestAnimationFrame(frame);
+}
+function pause(){
+  if (!playing) return;
+  playing = false;
+  resume = t0 === null ? 0 : (performance.now() - t0) % TOTAL;
+  if (rafId) cancelAnimationFrame(rafId);
+  loopBtn.textContent = 'play'; loopBtn.setAttribute('aria-pressed','false');
+}
+loopBtn.addEventListener('click', function(){
+  if (playing) pause(); else play();
+});
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden && playing) pause();
+});
+
+if (reduced){
+  /* static final state: everything measured and compared, no motion */
+  paint(0.95);
+  loopBtn.textContent = 'replay';
+  loopBtn.setAttribute('aria-pressed','false');
+} else {
+  rafId = requestAnimationFrame(frame);
+}
+
+/* ===================== copy button ===================== */
+var copyBtn = document.getElementById('copyBtn');
+var cmdText = document.getElementById('cmdText');
+copyBtn.addEventListener('click', function(){
+  var txt = cmdText.textContent;
+  function done(){
+    copyBtn.textContent = 'copied';
+    copyBtn.classList.add('done');
+    setTimeout(function(){
+      copyBtn.textContent = 'copy';
+      copyBtn.classList.remove('done');
+    }, 1600);
+  }
+  function fallback(){
+    var ta = document.createElement('textarea');
+    ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    ta.remove();
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, fallback);
+  } else fallback();
+});
+
+})();
+</script>
+
 </body>
 </html>
