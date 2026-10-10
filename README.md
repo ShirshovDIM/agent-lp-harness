@@ -24,7 +24,7 @@ The core idea: a model is only trusted if it reproduces what a **live** position
 
 | Pool | Live calibration (model vs actually claimed) |
 |---|---|
-| USDC-AERO CL2000 (Base) | model 1.0806 vs **1.084258 AERO actually claimed** (on-chain ClaimRewards, 4-day window) → ratio **0.9966** |
+| USDC-AERO CL2000 (Base) | model 1.0806 vs **1.073985 AERO actually claimed** (5 on-chain getReward txs inside the calibration window, see journals/claim_journal.md) → ratio **1.0061** |
 | WETH-USDC CL50 (Base) | calculation pending publication (live journal data) |
 | CELO/USDm fee=100 (Celo) | live pilot running since 2026-10-10; calibration block fills from its journal (≥48h) |
 
@@ -40,6 +40,12 @@ Every report carries, verbatim from a JSON output:
 5. **Caveats**: overlapping windows, market regime, simplifications — stated, not hidden.
 
 Any agent can emit a compatible report; the format is designed to be comparable across agents.
+
+
+## Public claim journal
+
+`journals/claim_journal.md` — every reward claim of the live positions backing the calibration,
+with tx hashes and amounts. Anyone can verify each row in a block explorer.
 
 ## Data integrity
 
