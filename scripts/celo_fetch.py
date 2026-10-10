@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Celo UniswapV3 CELO/cUSD fee=100 (0.01%) collector — hourly samples, checkpointed, resumable.
 
-Hourly {slot0(sqrtPriceX96, tick), liquidity, feeGrowthGlobal0/1} for the verification-report
-pilot, same shape as the Base pool-sample fetcher (no keys, no deps). Backfill 30 d + live tail.
+Hourly collector for a UniswapV3 pool on Celo mainnet: {slot0(sqrtPriceX96, tick), liquidity,
+feeGrowthGlobal0/1} — no keys, no deps. Backfill + live tail (checkpointed, resumable).
 
 Pool 0x2d70cbabf4d8e61d5317b62cbe912935fd94e0fe: UniswapV3Factory(0xAfE208a311B21f13EF87E33A90049fC17A7acDEc)
-.getPool(CELO 0x471EcE3750Da237f93B8E339c536989b8978a438, cUSD 0x765DE816845861e75A25fCA122bb6898B8B1282a, 100),
-liquidity ~1.05e21 (highest of the four fee tiers, 10.10 RPC). token0/token1/symbols are asserted at start.
-RPC https://forno.celo.org — archive eth_call verified 10.10 (slot0 at -30 d block returned).
+.getPool(CELO 0x471EcE3750Da237f93B8E339c536989b8978a438, USDm 0x765DE816845861e75A25fCA122bb6898B8B1282a, 100),
+largest of the four fee tiers at selection time. token0/token1 are asserted at start.
+RPC https://forno.celo.org — public archive (historical eth_call verified).
 Kill switch: file STOP_CELO_POOL next to the script.
 USAGE: celo_fetch.py --days 30 [--backfill] (backfill if no checkpoint; otherwise tail)
 """

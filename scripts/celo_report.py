@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Celo UniswapV3 CELO/cUSD fee=100 — verification-report compute.
+"""Celo UniswapV3 CELO/USDm fee=100 — verification-report compute.
 
 Input: data/samples.jsonl (hourly {ts, blk, sqrtPriceX96, tick, liquidity, feeGrowthGlobal0/1X128}).
 Method follows weth_rerange_modes (09.10): $150 position, entry at center, widths ±2/5/10/15/30%,
@@ -29,7 +29,7 @@ HORIZON_H = 14 * 24
 WIDTHS = [0.02, 0.05, 0.10, 0.15, 0.30]
 TIER_FEE = 0.0001          # fee=100 pool: 0.01%
 TIER_FEE_STRESS = 0.0005   # stress: a 0.05% execution penalty on rebalance volume
-GAS_CUSD = 0.001           # per re-range, Celo mainnet typical; refine from live pilot
+GAS_CUSD = 0.014           # per re-range, measured from NFPM txs on Celo mainnet ($0.01-0.018)
 
 
 def load():
@@ -66,21 +66,21 @@ def run():
     n = len(rows)
     first, last = rows[0], rows[-1]
     stats = {"pool": "0x2d70cbabf4d8e61d5317b62cbe912935fd94e0fe",
-             "pair": "CELO/cUSD fee=100 (0.01%), UniswapV3 on Celo mainnet",
-             "token0": "CELO(18d)", "token1": "cUSD(18d)",
+             "pair": "CELO/USDm fee=100 (0.01%), UniswapV3 on Celo mainnet",
+             "token0": "CELO(18d)", "token1": "USDm(18d)",
              "window_utc": [datetime.fromtimestamp(first["ts"], timezone.utc).isoformat(),
                             datetime.fromtimestamp(last["ts"], timezone.utc).isoformat()],
              "hours": n,
              "price_first": first["price"], "price_last": last["price"],
              "price_min": min(r["price"] for r in rows), "price_max": max(r["price"] for r in rows),
              "position_usd": POS_USD, "seed": SEED, "horizon_days": HORIZON_H // 24,
-             "calibration": None,   # no live position yet — the pilot adds it
+             "calibration": None,   # filled when a live position journal is available
              "widths": {}, "modes": {}}
 
-    # per-hour pool fee deltas (token units, 18d)
+    # per-hour pool fee deltas (token units per unit of liquidity)
     for i in range(1, n):
-        rows[i]["dfg0"] = (rows[i]["feeGrowthGlobal0X128"] - rows[i - 1]["feeGrowthGlobal0X128"]) / 2 ** 128 / 1e18
-        rows[i]["dfg1"] = (rows[i]["feeGrowthGlobal1X128"] - rows[i - 1]["feeGrowthGlobal1X128"]) / 2 ** 128 / 1e18
+        rows[i]["dfg0"] = (rows[i]["feeGrowthGlobal0X128"] - rows[i - 1]["feeGrowthGlobal0X128"]) / 2 ** 128
+        rows[i]["dfg1"] = (rows[i]["feeGrowthGlobal1X128"] - rows[i - 1]["feeGrowthGlobal1X128"]) / 2 ** 128
     rows[0]["dfg0"] = rows[0]["dfg1"] = 0.0
 
     import random
@@ -104,7 +104,7 @@ def run():
             hold_final = t0 * seg[-1]["price"] + t1 + fees
             res_hold.append(hold_final / POS_USD - 1)
             # RE-RANGE: on first hour out of range, close at market, re-enter centered at width w
-            fees, j, pa_c, pb_c, Lc, cost = 0.0, 0, pa, pb, L, 0.0
+            fees, j, pa_c, pb_c, Lc = 0.0, 0, pa, pb, L
             while j < len(seg):
                 r = seg[j]
                 if pa_c <= r["price"] <= pb_c:
@@ -112,8 +112,7 @@ def run():
                 else:
                     t0, t1 = amounts(Lc, pa_c, pb_c, r["price"])
                     usd_now = t0 * r["price"] + t1 + fees
-                    # rebalance: swap to 50/50 at tier fee + gas, re-center
-                    cost += usd_now * TIER_FEE + GAS_CUSD
+                    # rebalance: swap to 50/50 at tier fee + gas, re-center (cost applied once here)
                     usd_now -= usd_now * TIER_FEE + GAS_CUSD
                     Lc, pa_c, pb_c = position_for_width(r["price"], w, usd_now)
                     fees = 0.0
@@ -122,7 +121,7 @@ def run():
                         fees += Lc * r["dfg0"] * r["price"] + Lc * r["dfg1"]
                 j += 1
             t0, t1 = amounts(Lc, pa_c, pb_c, seg[-1]["price"])
-            re_final = t0 * seg[-1]["price"] + t1 + fees - cost
+            re_final = t0 * seg[-1]["price"] + t1 + fees
             res_re.append(re_final / POS_USD - 1)
 
         def q(v, p):
@@ -131,9 +130,11 @@ def run():
 
         stats["widths"][f"±{int(w * 100)}%"] = {
             "hold_vs_usd": {"median": q(res_hold, 0.5), "p10": q(res_hold, 0.1), "p90": q(res_hold, 0.9),
-                            "P(<-5%)": sum(1 for v in res_hold if v < -0.05) / len(res_hold)},
+                            "P(<-5%)": sum(1 for v in res_hold if v < -0.05) / len(res_hold),
+                            "P(<-10%)": sum(1 for v in res_hold if v < -0.10) / len(res_hold)},
             "rerange_vs_usd": {"median": q(res_re, 0.5), "p10": q(res_re, 0.1), "p90": q(res_re, 0.9),
-                               "P(<-5%)": sum(1 for v in res_re if v < -0.05) / len(res_re)},
+                               "P(<-5%)": sum(1 for v in res_re if v < -0.05) / len(res_re),
+                               "P(<-10%)": sum(1 for v in res_re if v < -0.10) / len(res_re)},
         }
     OUT_JSON.write_text(json.dumps(stats, indent=1), encoding="utf-8")
     print(json.dumps({k: stats[k] for k in ("hours", "starts", "price_first", "price_last")}, indent=1))

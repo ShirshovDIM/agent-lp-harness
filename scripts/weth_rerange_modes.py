@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Перестройка WETH-USDC CL50 (Aerodrome Slipstream F3) после выхода из диапазона: обмен против «без обмена».
-Без LLM, детерминированно.
+Deterministic replay of re-range policy modes; no LLM.
 
 Режимы (база ±10 %, размер 150 USD, вход по центру):
   A   — по выходу закрыть, обменять до пропорции и встать по центру ±10 % (как живой пилот).

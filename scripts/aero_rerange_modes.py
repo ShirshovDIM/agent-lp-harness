@@ -45,8 +45,9 @@ N_STARTS, SEED = 113, 113
 HORIZONS = (14, 30)
 Q96, Q128 = 2 ** 96, 2 ** 128
 VOL_N, VOL_K, VOL_MIN, VOL_MAX = 6, 2.0, 0.02, 0.15
-# якорь калибровки: живой пилот — L, интервал, сумма claimed
-ANCHOR = {"L": None, "range": None, "t0": 1791201318, "t1": 1791548537, "claimed_aero": 1.0735}
+# calibration anchor: public on-chain data only (ClaimRewards events of tokenId below over the window);
+# position L/range are withheld (run-time args for reproduction)
+ANCHOR = {"token_id": 77587480, "t0": 1791201318, "t1": 1791548537, "claimed_aero": 1.084258}
 
 
 def load():
