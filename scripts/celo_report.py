@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Celo UniswapV3 CELO/cUSD fee=100 — verification-report compute (pilot).
+"""Celo UniswapV3 CELO/cUSD fee=100 — verification-report compute.
 
 Input: data/samples.jsonl (hourly {ts, blk, sqrtPriceX96, tick, liquidity, feeGrowthGlobal0/1X128}).
 Method follows weth_rerange_modes (09.10): $150 position, entry at center, widths ±2/5/10/15/30%,
 113 seeded random starts (seed 113), 14-day horizon, medians/p10/p90, tails, explicit caveats.
-CALIBRATION: none yet — no live Celo position; the block stays empty until the live pilot runs
-(loop: report -> pilot -> calibrated update).
+CALIBRATION: none yet in this dataset; the block fills when a live position journal is available
+(report -> live pilot -> calibrated update).
 
 Fees model: position share of feeGrowthGlobal delta while price in range (no tick-outside terms —
 global-only hourly data, same simplification as the weth measure; flagged in caveats).

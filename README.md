@@ -54,3 +54,13 @@ Deterministic: fixed seed (113), no network in the compute step, no LLM anywhere
 ## License
 
 MIT.
+
+
+## Data and scope
+
+- `data/*.json` are the full JSON outputs of the three published measurements (reproducible artifacts).
+- The Base measurement scripts read hourly pool snapshots from a local collector store
+  (not part of this repo); the Celo collector (`scripts/celo_fetch.py`) rebuilds its dataset
+  from any public Celo archive RPC — run it to reproduce `data/celo_pool_*.json` inputs.
+- The live agent runtime (position engine, keys, execution) is private and is NOT part of this repo;
+  this repo is the verification harness: replay + calibration against the public per-claim journals.
