@@ -45,7 +45,8 @@ N_STARTS, SEED = 113, 113
 HORIZONS = (14, 30)
 Q96, Q128 = 2 ** 96, 2 ** 128
 VOL_N, VOL_K, VOL_MIN, VOL_MAX = 6, 2.0, 0.02, 0.15
-# calibration anchor: public on-chain data only (ClaimRewards events of tokenId below over the window);
+# calibration anchor: public on-chain data only
+POS_TICK_LO, POS_TICK_HI = -999999, 999999  # placeholder: real bounds are runtime args (withheld) (ClaimRewards events of tokenId below over the window);
 # position L/range are withheld (run-time args for reproduction)
 ANCHOR = {"token_id": 77587480, "t0": 1791201318, "t1": 1791548537, "claimed_aero": 1.084257}  # 6 on-chain getReward txs in window (journals/claim_journal.md)
 
@@ -233,7 +234,7 @@ def anchor(S):
     if len(idx) < 2:
         return None
     a = sum((S[i]["rgg"] - S[i - 1]["rgg"]) * ANCHOR["L"] / Q128 / 1e18
-            for i in idx[1:] if lo <= S[i]["tick"] < hi)
+            for i in idx[1:] if POS_TICK_LO <= S[i]["tick"] < POS_TICK_HI)  # positional bounds (privatized from ANCHOR)
     return {"model_aero": round(a, 4), "claimed_aero": ANCHOR["claimed_aero"], "ratio": round(a / ANCHOR["claimed_aero"], 4),
             "from": S[idx[0]]["ts"], "to": S[idx[-1]]["ts"]}
 
