@@ -7,7 +7,6 @@ transferred by the claim transaction.
 ## Position: USDC-AERO CL2000, Base (Aerodrome Slipstream)
 
 - pool `0xBE00fF35AF70E8415D0eB605A286D8A45466A4c1`, gauge `0x430C09546ae9249AB75B9A4ef7B5FD9a4006D6f3`
-- tokenId **77587480**
 - deposit 2026-10-05 11:55:12Z `0x4750ce064022531ba4d215edc61fc13ef858cb17781f8d304028ad09963c88e2`
 - redeposit (reinvest) 2026-10-09 23:48:18Z `0x8c2cb73f6df1a5544f4a92d4c3224647bfb8561c6f152fc783ccabfb9ee50743`
 - withdraw (reinvest, pays accrued) 2026-10-09 23:47:53Z `0xa35d67dbdf7b1044950b5588c1d8b3810d9c91dd960b35d14b26bdb12b3ceebe`
@@ -16,7 +15,7 @@ transferred by the claim transaction.
 
 | # | time (UTC) | tx | AERO claimed |
 |---|---|---|---|
-| 0 | 2026-10-05 12:33:03Z | `0x841c677cdc204b90346ebbd0968ab3dbc9962a22f63676d4a990d0f0fcef84f7` | 0.010272 |
+| 0 | 2026-10-05 12:20:15Z | `0x841c677cdc204b90346ebbd0968ab3dbc9962a22f63676d4a990d0f0fcef84f7` | 0.010272 |
 | 1 | 2026-10-05 12:22:11Z | `0xb51cb4df7472c4c09864b811283a5818ee38dd3063f6a32f50ddceb75aabbf9b` | 0.000611 |
 | 2 | 2026-10-06 12:22:11Z | `0x4f2ab64d9f0d5ce4d81914549f7d77fa87199e3126ad4aab65ca1009bc507fdb` | 0.309624 |
 | 3 | 2026-10-07 12:22:11Z | `0xf4f9eb3981e261e54de39384cb9094cf751b2e61a83fa696c87bb19992bccdb3` | 0.233139 |
