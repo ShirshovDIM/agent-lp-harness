@@ -47,7 +47,7 @@ Q96, Q128 = 2 ** 96, 2 ** 128
 VOL_N, VOL_K, VOL_MIN, VOL_MAX = 6, 2.0, 0.02, 0.15
 # calibration anchor: public on-chain data only (ClaimRewards events of tokenId below over the window);
 # position L/range are withheld (run-time args for reproduction)
-ANCHOR = {"token_id": 77587480, "t0": 1791201318, "t1": 1791548537, "claimed_aero": 1.084258}
+ANCHOR = {"token_id": 77587480, "t0": 1791201318, "t1": 1791548537, "claimed_aero": 1.084257}  # 6 on-chain getReward txs in window (journals/claim_journal.md)
 
 
 def load():
@@ -229,7 +229,6 @@ def diff_stats(d):
 
 def anchor(S):
     """Модель наград на живом окне пилота против суммы claimed из журнала."""
-    lo, hi = ANCHOR["range"]
     idx = [i for i, s in enumerate(S) if ANCHOR["t0"] <= s["ts"] <= ANCHOR["t1"]]
     if len(idx) < 2:
         return None
