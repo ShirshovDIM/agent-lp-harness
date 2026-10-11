@@ -16,6 +16,7 @@ transferred by the claim transaction.
 
 | # | time (UTC) | tx | AERO claimed |
 |---|---|---|---|
+| 0 | 2026-10-05 12:33:03Z | `0x841c677cdc204b90346ebbd0968ab3dbc9962a22f63676d4a990d0f0fcef84f7` | 0.010272 |
 | 1 | 2026-10-05 12:22:11Z | `0xb51cb4df7472c4c09864b811283a5818ee38dd3063f6a32f50ddceb75aabbf9b` | 0.000611 |
 | 2 | 2026-10-06 12:22:11Z | `0x4f2ab64d9f0d5ce4d81914549f7d77fa87199e3126ad4aab65ca1009bc507fdb` | 0.309624 |
 | 3 | 2026-10-07 12:22:11Z | `0xf4f9eb3981e261e54de39384cb9094cf751b2e61a83fa696c87bb19992bccdb3` | 0.233139 |
@@ -25,8 +26,9 @@ transferred by the claim transaction.
 
 ### Calibration window 2026-10-05 11:55Z → 2026-10-09 12:22Z
 
-Claims **within the window: rows 1–5, total 1.073985 AERO**. The replay model over the same
-window predicts **1.0806 AERO** → ratio **1.0061**. (Row 6 and the reinvest withdraw are outside
+Claims **within the window: rows 0–5, total 1.084257 AERO**. The replay model over the same
+window predicts **1.0806 AERO** → ratio **0.9966**. (Row 0 was initially missed by our internal
+probe journal and caught by an external audit — the journal below is the complete on-chain truth.) (Row 6 and the reinvest withdraw are outside
 the window; an external recount that includes different boundaries is expected to differ — the
 window edges are what matters, and they are the deposit/claim timestamps above.)
 

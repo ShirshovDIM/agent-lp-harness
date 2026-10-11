@@ -24,7 +24,7 @@ The core idea: a model is only trusted if it reproduces what a **live** position
 
 | Pool | Live calibration (model vs actually claimed) |
 |---|---|
-| USDC-AERO CL2000 (Base) | model 1.0806 vs **1.073985 AERO actually claimed** (5 on-chain getReward txs inside the calibration window, see journals/claim_journal.md) → ratio **1.0061** |
+| USDC-AERO CL2000 (Base) | model 1.0806 vs **1.084257 AERO actually claimed** (6 on-chain getReward txs inside the calibration window — complete list with hashes in journals/claim_journal.md) → ratio **0.9966** |
 | WETH-USDC CL50 (Base) | calculation pending publication (live journal data) |
 | CELO/USDm fee=100 (Celo) | live pilot running since 2026-10-10; calibration block fills from its journal (≥48h) |
 
