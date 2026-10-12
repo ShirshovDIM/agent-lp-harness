@@ -233,7 +233,10 @@ def anchor(S):
     idx = [i for i, s in enumerate(S) if ANCHOR["t0"] <= s["ts"] <= ANCHOR["t1"]]
     if len(idx) < 2:
         return None
-    a = sum((S[i]["rgg"] - S[i - 1]["rgg"]) * ANCHOR["L"] / Q128 / 1e18
+    anchor_L = ANCHOR.get("L")
+    if anchor_L is None:
+        return {"anchor": "withheld (needs --L --tick-lo --tick-hi runtime args)"}
+    a = sum((S[i]["rgg"] - S[i - 1]["rgg"]) * anchor_L / Q128 / 1e18
             for i in idx[1:] if POS_TICK_LO <= S[i]["tick"] < POS_TICK_HI)  # positional bounds (privatized from ANCHOR)
     return {"model_aero": round(a, 4), "claimed_aero": ANCHOR["claimed_aero"], "ratio": round(a / ANCHOR["claimed_aero"], 4),
             "from": S[idx[0]]["ts"], "to": S[idx[-1]]["ts"]}
