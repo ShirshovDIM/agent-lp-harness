@@ -1,0 +1,28 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "agent-lp-harness: LP yield verifier (Celo)",
+  "description": "Open-source harness that checks LP yield claims of concentrated-liquidity agents against public on-chain data: it replays pool state and compares modeled rewards with rewards a live position actually claimed. Celo: Uniswap V3 CELO/USDm fee-100 pool 0x2d70cbabf4d8e61d5317b62cbe912935fd94e0fe, reference position NFPM tokenId 202630 (the author's own). The harness is read-only and holds no keys. Self Agent ID 193 is an ID in a different registry (0xaC3D...5944), not this one.",
+  "image": "https://shirshovdim.github.io/agent-lp-harness/favicon.svg",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://shirshovdim.github.io/agent-lp-harness/"
+    },
+    {
+      "name": "web",
+      "endpoint": "https://github.com/ShirshovDIM/agent-lp-harness"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [
+    {
+      "agentId": 9890,
+      "agentRegistry": "eip155:42220:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    },
+    {
+      "agentId": 193,
+      "agentRegistry": "eip155:42220:0xaC3DF9ABf80d0F5c020C06B04Cced27763355944"
+    }
+  ]
+}
