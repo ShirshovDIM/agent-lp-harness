@@ -68,20 +68,22 @@ which back-links both registrations.
 
 | File | sha256 (first 16) |
 |---|---|
-| data/celo_pool_2026-10-10.json | 15ae0939e82d3200 |
+| data/celo_pool_2026-10-10.json | cefd22f54a2ef8d5 |
 | data/weth_rerange_modes_2026-10-09.json | 3d584f2d58abe6cd |
 | data/aero_rerange_modes_2026-10-10.json | af622de2a9b2b635 |
 
-Hashes computed on LF-normalized git blobs: .
-Rebuild the Celo dataset with `scripts/celo_fetch.py --from <ISO> --to <ISO>` (public archive
-RPC, deterministic window) and re-run `scripts/celo_report.py` to match the hash above.
+Verify a hash (git stores the LF blob):
+`git show HEAD:data/<file>.json | sha256sum`.
+Rebuild the Celo dataset with `scripts/celo_fetch.py --from 2026-09-10T02:00:00Z --to 2026-10-12T16:00:00Z`
+(public archive RPC, exact window of the published data) and re-run `scripts/celo_report.py`;
+the script writes `scripts/celo_pool_2026-10-10.json` — normalize to LF before hashing on Windows.
 
 ## Reproduce
 
 ```bash
-# Celo pool measurement (data first, then compute)
-python3 scripts/celo_fetch.py --days 30
-python3 scripts/celo_report.py
+# Celo pool measurement (data first, then compute; exact published window)
+python3 scripts/celo_fetch.py --from 2026-09-10T02:00:00Z --to 2026-10-12T16:00:00Z
+python3 scripts/celo_report.py   # writes scripts/celo_pool_2026-10-10.json (copy to data/ and LF-normalize to match the hash)
 
 # Single-position verification (any live UniswapV3 position on Celo, public RPC, no keys)
 python3 scripts/verify.py --position 202630 --hours 24

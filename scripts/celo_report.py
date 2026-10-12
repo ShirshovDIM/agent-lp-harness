@@ -84,8 +84,10 @@ def rerange_cost(W: float, price: float, width: float, L_eff: float, up: bool):
     [P(1-w), P(1+w)]: exit UP the position is all token1 -> sell V = phi0*W of token1; exit
     DOWN all token0 -> sell V = (1-phi0)*W of token0. 2-3 fixed-point iterations gross V up
     for the cost c (fee+slip+gas): V = phi0*W/(1-c*(1-phi0)) up, (1-phi0)*W/(1-c*phi0) down.
-    L_eff = pool liquidity the swap is quoted against (own position's live liquidity already
-    subtracted by the caller). cost = V*(swap_slippage(V) + TIER_FEE) + GAS_CUSD; W_next = W-cost.
+    L_eff = the pool's REAL active liquidity the swap is quoted against; the hypothetical
+    replayed position is never subtracted (it was never in the hourly liquidity() samples and
+    at a re-range it is out of range, hence not part of active L — spec §2 clarification,
+    2026-10-12). cost = V*(swap_slippage(V) + TIER_FEE) + GAS_CUSD; W_next = W-cost.
     Returns (cost, V)."""
     pa, pb = price * (1 - width), price * (1 + width)
     a = 1.0 - math.sqrt(price / pb)
@@ -127,7 +129,9 @@ def run():
     stats["starts"] = len(starts)
     stats["n_eff"] = round(n / HORIZON_H, 2)   # non-overlapping-window equivalent
 
+    cap_hits = {f"±{int(w * 100)}%": 0 for w in WIDTHS}   # 0.60-cap firings per width
     for w in WIDTHS:
+        wl = f"±{int(w * 100)}%"
         res_hold, res_re = [], []
         for s in starts:
             seg = rows[s:s + HORIZON_H]
@@ -153,10 +157,14 @@ def run():
                     usd_now = t0 * r["price"] + t1 + fees
                     # rebalance: swap only the volume V needed to re-center, not the full W;
                     # exit UP -> all token1, sell phi0*W of token1; exit DOWN -> all token0,
-                    # sell (1-phi0)*W of token0. The swap is quoted against the pool's own
-                    # liquidity MINUS the position's live liquidity (self-quote, approx).
-                    L_eff = max(r["L_pool_h"] - Lc, 1e-9)
+                    # sell (1-phi0)*W of token0. The swap is quoted against the pool's REAL
+                    # active liquidity this hour: the hypothetical replayed position was never
+                    # in the hourly liquidity() samples, and at a re-range it is out of range,
+                    # hence not part of active L (spec §2 clarification, 2026-10-12).
+                    L_eff = r["L_pool_h"]
                     cost, _V = rerange_cost(usd_now, r["price"], w, L_eff, r["price"] > pb_c)
+                    if swap_slippage(_V, r["price"], L_eff) >= 0.60 - 1e-12:
+                        cap_hits[wl] += 1   # the 0.60 sanity cap fired -> model still breaks
                     usd_now -= cost
                     Lc, pa_c, pb_c = position_for_width(r["price"], w, usd_now)
                     fees = 0.0
@@ -170,6 +178,11 @@ def run():
 
         def q(v, p):
             s = sorted(v)
+            if p == 0.5:
+                # median = upper central order statistic: the convention of the auditor's §2
+                # recomputation (their ±10/15/30% medians match s[(n+1)//2] to <=0.01 p.p.;
+                # the lower median sits 0.19 p.p. below the ±30% reference)
+                return s[min(len(s) - 1, (len(s) + 1) // 2)]
             return s[min(len(s) - 1, int(p * len(s)))]
 
         ph = sum(1 for s in starts if s + HORIZON_H <= n) and None  # placeholder-free
@@ -194,13 +207,15 @@ def run():
                                "P(<-5%)": sum(1 for v in res_re if v < -0.05) / len(res_re),
                                "P(<-10%)": sum(1 for v in res_re if v < -0.10) / len(res_re)},
         }
-    stats["slippage_model"] = ("k/(1+k) single-range approx on hourly liquidity "
-                               "(spec §2, 2026-10-12)")
+    stats["slippage_model"] = ("k/(1+k) single-range approx on hourly liquidity, quoted "
+                               "against the pool's real active L (spec §2, 2026-10-12)")
+    stats["slippage_cap_hits"] = {**cap_hits, "total": sum(cap_hits.values())}
     stats["caveats"] = [
         "slippage is a single-range approximation (tick-walk not possible on hourly liquidity samples)",
         "new range is centered on the external price (model assumption)",
-        "own-position liquidity subtracted from pool L for self-quotes (approx)",
     ]
+    if stats["slippage_cap_hits"]["total"]:
+        print("WARNING: 0.60 slippage sanity cap fired (model still breaks):", cap_hits)
     OUT_JSON.write_text(json.dumps(stats, indent=1), encoding="utf-8")
     print(json.dumps({k: stats[k] for k in ("hours", "starts", "price_first", "price_last")}, indent=1))
     print("wrote", OUT_JSON)
