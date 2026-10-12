@@ -1,3 +1,5 @@
 
 # dev iteration artifacts (screenshots, capture scripts, scan results) are NOT published
 docs/.dev/
+__pycache__/
+*.pyc
