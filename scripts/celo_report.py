@@ -64,14 +64,39 @@ def position_for_width(price, width, usd=POS_USD):
 
 
 def swap_slippage(usd_amount: float, price: float, L_pool_h: float) -> float:
-    """Execution penalty fraction for a swap of usd_amount through the pool at price with active
-    liquidity L_pool_h (human units): solve the pool curve for the realized price. For a swap
-    entirely within the active range: delta_p/p = usd_amount / (L_pool_h * price^1.5 * 2); the
-    average execution penalty is half the end-slippage."""
+    """Execution penalty fraction for a swap of usd_amount (token1 human units) through the pool
+    at price with active liquidity L_pool_h (human units), staying inside one tick range
+    (auditor spec §2, 2026-10-12):
+        k = U*(1-f) / (L_h*sqrt(P_h))            f = TIER_FEE
+        penalty_without_fee = k/(1+k)            full cost per unit = 1 - (1-f)/(1+k)
+    Verified against the bit-exact UniswapV3Pool.swap port (scripts/v3math.py, replayed in
+    tests/test_celo_report.py) and QuoterV2 actuals on the BREF block. Single-range
+    approximation: no tick walk is possible on hourly liquidity samples."""
     if L_pool_h <= 0 or usd_amount <= 0:
         return 0.0
-    end_slip = (usd_amount / (L_pool_h * price * math.sqrt(price))) / 2.0
-    return min(end_slip / 2.0, 0.60)   # cap at 60% — sanity for pathological hours
+    k = usd_amount * (1.0 - TIER_FEE) / (L_pool_h * math.sqrt(price))
+    return min(k / (1.0 + k), 0.60)   # cap at 60% — sanity for pathological hours (must not bind normally)
+
+
+def rerange_cost(W: float, price: float, width: float, L_eff: float, up: bool):
+    """Cost of the rebalancing swap at a re-range, applied to the SWAPPED volume V, not to the
+    full position value W (spec §2, 2026-10-12). phi0 = token0 share of the NEW centered range
+    [P(1-w), P(1+w)]: exit UP the position is all token1 -> sell V = phi0*W of token1; exit
+    DOWN all token0 -> sell V = (1-phi0)*W of token0. 2-3 fixed-point iterations gross V up
+    for the cost c (fee+slip+gas): V = phi0*W/(1-c*(1-phi0)) up, (1-phi0)*W/(1-c*phi0) down.
+    L_eff = pool liquidity the swap is quoted against (own position's live liquidity already
+    subtracted by the caller). cost = V*(swap_slippage(V) + TIER_FEE) + GAS_CUSD; W_next = W-cost.
+    Returns (cost, V)."""
+    pa, pb = price * (1 - width), price * (1 + width)
+    a = 1.0 - math.sqrt(price / pb)
+    b = 1.0 - math.sqrt(pa / price)
+    phi0 = a / (a + b)
+    V = (phi0 if up else 1.0 - phi0) * W
+    for _ in range(3):
+        c = swap_slippage(V, price, L_eff) + TIER_FEE + GAS_CUSD / max(V, 1e-12)
+        V = phi0 * W / (1.0 - c * (1.0 - phi0)) if up else (1.0 - phi0) * W / (1.0 - c * phi0)
+    cost = V * (swap_slippage(V, price, L_eff) + TIER_FEE) + GAS_CUSD
+    return cost, V
 
 
 def run():
@@ -126,10 +151,13 @@ def run():
                 else:
                     t0, t1 = amounts(Lc, pa_c, pb_c, r["price"])
                     usd_now = t0 * r["price"] + t1 + fees
-                    # rebalance: swap to 50/50; cost = tier fee + curve slippage vs the pool's
-                    # own liquidity + gas (applied once here)
-                    slip = swap_slippage(usd_now, r["price"], r["L_pool_h"])
-                    usd_now -= usd_now * (TIER_FEE + slip) + GAS_CUSD
+                    # rebalance: swap only the volume V needed to re-center, not the full W;
+                    # exit UP -> all token1, sell phi0*W of token1; exit DOWN -> all token0,
+                    # sell (1-phi0)*W of token0. The swap is quoted against the pool's own
+                    # liquidity MINUS the position's live liquidity (self-quote, approx).
+                    L_eff = max(r["L_pool_h"] - Lc, 1e-9)
+                    cost, _V = rerange_cost(usd_now, r["price"], w, L_eff, r["price"] > pb_c)
+                    usd_now -= cost
                     Lc, pa_c, pb_c = position_for_width(r["price"], w, usd_now)
                     fees = 0.0
                     r = seg[j]
@@ -166,6 +194,13 @@ def run():
                                "P(<-5%)": sum(1 for v in res_re if v < -0.05) / len(res_re),
                                "P(<-10%)": sum(1 for v in res_re if v < -0.10) / len(res_re)},
         }
+    stats["slippage_model"] = ("k/(1+k) single-range approx on hourly liquidity "
+                               "(spec §2, 2026-10-12)")
+    stats["caveats"] = [
+        "slippage is a single-range approximation (tick-walk not possible on hourly liquidity samples)",
+        "new range is centered on the external price (model assumption)",
+        "own-position liquidity subtracted from pool L for self-quotes (approx)",
+    ]
     OUT_JSON.write_text(json.dumps(stats, indent=1), encoding="utf-8")
     print(json.dumps({k: stats[k] for k in ("hours", "starts", "price_first", "price_last")}, indent=1))
     print("wrote", OUT_JSON)

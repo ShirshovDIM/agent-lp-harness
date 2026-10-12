@@ -1,220 +1,513 @@
 #!/usr/bin/env python3
-"""verify.py — independent LP-position verification CLI (Celo mainnet).
+"""verify.py — LP-position verification CLI (Celo mainnet, chain 42220).
 
-Rebuilds a position's performance from on-chain data only: reads the position by tokenId
-(UniswapV3 NonfungiblePositionManager), collects hourly pool snapshots over a window via a
-public archive RPC, replays the position (hold; fees = the position's share of
-ΔfeeGrowthGlobal while in range), and emits a report matching schemas/report-v1.schema.json
-(with data_hash of the collected dataset). HODL benchmark from the position's entry mix.
+Implements auditor spec verify_spec_2026-10-12.md §1.2 (method refA):
+
+  * position discovery: NFPM Transfer(from=0, topic3=tokenId) gives B_mint and the mint tx;
+    IncreaseLiquidity(tokenId) in the mint-tx receipt gives entry L (word 0), a0 (word 1),
+    a1 (word 2); NFPM.positions(tokenId) at the mint block gives tickLower/tickUpper/
+    token0/token1/fee; factory.getPool(token0, token1, fee) gives the pool.
+  * state at block b: slot0 (sqrtPriceX96 word 0, signed tick word 1), feeGrowthGlobal0/1X128,
+    ticks(tickLower/tickUpper) words 2,3 (feeGrowthOutside0/1X128), NFPM.positions(tokenId)
+    word 7 = liquidity, words 8,9 = feeGrowthInsideLast0/1, words 10,11 = tokensOwed.
+    f_i = owed_i + ((inside_i_now - inside_i_last) mod 2^256) * L // 2^128.
+  * prices/values in exact arithmetic (int for raw amounts, Fraction for human values,
+    no floats in any sum):
+      P(b)      = sqrtPriceX96^2 / 2^192 * 10^d0 / 10^d1          (token1 per token0)
+      V0        = a0 * P(B_mint) + a1                             (entry value)
+      value_lp  = (x + f0) * P_end + (y + f1)                     (position + uncollected fees)
+      hodl_mix  = a0 * P_end + a1                                 (hold entry mix)
+      hodl_5050 = (V0/2) / P_start * P_end + V0/2                 (rebalanced 50/50)
+  * blocks by timestamp: Celo L2 maps 1 block = 1 second; b = b_anchor + (ts_target -
+    ts_anchor), verified with eth_getBlockByNumber at both window ends.
 
 USAGE:
-    python3 scripts/verify.py --position <tokenId> [--days 14] [--rpc https://forno.celo.org]
-    python3 scripts/verify.py --validate <report.json>      # schema check (any chain)
+    python3 scripts/verify.py --position <tokenId> [--hours N | --end-block B]
+    python3 scripts/verify.py --validate <report.json>
 
-No keys, no LLM; stdlib only. Numbers verbatim into stdout JSON.
+--end-block B pins the window end to exactly block B (overrides --hours); window.hours
+is then reported as (ts_end - ts_mint)/3600 from the block timestamps.
+
+Only stdlib + verify_lib (read-only RPC, whitelisted methods, retries handled there).
 """
 import argparse
 import hashlib
 import json
+import os
+import re
 import sys
-import time
-import urllib.request
 from datetime import datetime, timezone
+from fractions import Fraction
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import verify_lib as vl  # noqa: E402
 
 NFPM = "0x3d79EdAaBC0EaB6F08ED885C05Fc0B014290D95A"
 FACTORY = "0xAfE208a311B21f13EF87E33A90049fC17A7acDEc"
 CHAIN_ID = 42220
-GETPOOL = "0x1698ee82"
-POSITIONS = "0x993ab265"
-SLOT0, LIQ, FGG0, FGG1 = "0x3850c7bd", "0x1a686502", "0xf3058399", "0x46141319"
-METHOD = "verify.py/1.0 (hourly hold replay, global feeGrowth)"
+METHOD_VERSION = "verify.py/2.0 (spec verify_spec_2026-10-12.md §1.2: IL-event entry, NFPM positions, feeGrowthInside fees, Fraction arithmetic)"
+
+Q128 = 1 << 128
+GETLOGS_MAX_RANGE = 5000  # forno eth_getLogs limit
+
+SEL_POSITIONS = vl.sel("positions(uint256)")          # 0x99fbab88
+SEL_GETPOOL = vl.sel("getPool(address,address,uint24)")
+SEL_DECIMALS = vl.sel("decimals()")
+SEL_SLOT0 = vl.sel("slot0()")
+SEL_TICKS = vl.sel("ticks(int24)")
+SEL_FGG0 = vl.sel("feeGrowthGlobal0X128()")
+SEL_FGG1 = vl.sel("feeGrowthGlobal1X128()")
+TOPIC_TRANSFER = vl.topic("Transfer(address,address,uint256)")
+TOPIC_IL = vl.topic("IncreaseLiquidity(uint256,uint128,uint256,uint256)")  # 0x3067048b...
+
+# ---------------- helpers ----------------
+
+def dec_str(fr, places=30):
+    """Exact decimal string of a Fraction (floor at `places` digits)."""
+    n, d = fr.numerator, fr.denominator
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    ip, rp = divmod(n, d)
+    digits = []
+    for _ in range(places):
+        rp *= 10
+        q, rp = divmod(rp, d)
+        digits.append(str(q))
+        if rp == 0:
+            break
+    frac = "".join(digits).rstrip("0")
+    return f"{sign}{ip}.{frac}" if frac else f"{sign}{ip}"
 
 
-def rpc(url, method, params, _retry=0):
-    req = urllib.request.Request(
-        url, data=json.dumps({"jsonrpc": "2.0", "method": method, "params": params,
-                              "id": 1}).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; lp-verify/1.0)"})
+def enc32(v):
+    """32-byte hex topic word WITH 0x prefix (vl.enc_int has no prefix)."""
+    return "0x" + vl.enc_int(v)
+
+
+def addr_of(hexword):
+    h = hexword[2:] if isinstance(hexword, str) and hexword.startswith("0x") else hexword
+    if isinstance(h, str):
+        return "0x" + h[-40:]
+    return "0x" + format(h & ((1 << 160) - 1), "040x")  # from a parsed word
+
+
+def call(to, data, block):
+    return vl.call(to, data, block)
+
+
+def chain_assert():
+    cid = int(vl.rpc("eth_chainId", []), 16)
+    if cid != CHAIN_ID:
+        raise SystemExit(f"rpc chain id {cid} != expected {CHAIN_ID} (Celo mainnet)")
+
+
+def nfpm_positions_raw(token_id, block):
+    return call(NFPM, SEL_POSITIONS + vl.enc_int(token_id), block)
+
+
+def nfpm_positions_ok(token_id, block):
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            j = json.loads(r.read())
-        if "error" in j:
-            raise RuntimeError(f"rpc error: {j['error']}")
-        if "result" not in j:
-            print("DEBUG rpc no-result:", json.dumps(j)[:200], file=sys.stderr)
-        return j.get("result")
+        r = nfpm_positions_raw(token_id, block)
+        return r is not None and r != "0x"
     except Exception:
-        if _retry >= 3:
-            raise
-        time.sleep(3 * (_retry + 1))
-        return rpc(url, method, params, _retry + 1)
+        return False  # revert: token does not exist at this block
 
 
-def call(url, to, sel, block="latest"):
-    return rpc(url, "eth_call", [{"to": to, "data": sel}, block])
+def find_mint(token_id, head):
+    """Mint tx/block from Transfer(from=0, topic3=tokenId) on the NFPM.
+
+    A full-range getLogs is impossible (5000-block limit), so first bracket the mint
+    block with a binary search on NFPM.positions(tokenId) existence, then pull the
+    Transfer log from that single block. Falls back to a backward chunked getLogs
+    scan if the token no longer exists (burned position).
+    """
+    log_topics = [TOPIC_TRANSFER, enc32(0), None, enc32(token_id)]
+
+    def getlogs(a, b):
+        p = {"address": NFPM, "fromBlock": hex(a), "toBlock": hex(b), "topics": log_topics}
+        try:
+            return vl.rpc("eth_getLogs", [p])
+        except ValueError:
+            return []  # deterministic http400: range/revert, no logs to return
+
+    def is_mint_transfer(lg):
+        t = lg.get("topics") or []
+        return (lg["address"].lower() == NFPM.lower() and len(t) == 4
+                and t[0] == TOPIC_TRANSFER and t[1] == enc32(0)
+                and t[3] == enc32(token_id))
+
+    blk = None
+    if nfpm_positions_ok(token_id, head):
+        # live token: binary-search the first block where positions(tokenId) succeeds
+        lo, hi = 0, head
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if nfpm_positions_ok(token_id, mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        blk = lo
+    else:
+        # burned token: scan backwards for the mint log in max-range chunks
+        a = head
+        while a > 0 and a > head - GETLOGS_MAX_RANGE * 200:
+            b0 = max(0, a - GETLOGS_MAX_RANGE)
+            logs = getlogs(b0, a)
+            hit = [lg for lg in logs if is_mint_transfer(lg)]
+            if hit:
+                lg = hit[-1]
+                return lg["transactionHash"], int(lg["blockNumber"], 16), lg
+            a = b0 - 1
+        raise SystemExit(
+            f"tokenId {token_id} does not exist at head (burned?) and its mint log is not "
+            f"indexed within {GETLOGS_MAX_RANGE * 200} blocks below head")
+
+    logs = [lg for lg in getlogs(blk, blk) if is_mint_transfer(lg)]
+    if not logs:
+        # log index may lag the state archive: scan the block's tx receipts instead
+        blkfull = vl.rpc("eth_getBlockByNumber", [hex(blk), True])
+        if blkfull:
+            import time as _t
+            for tx in blkfull.get("transactions", []):
+                rc = None
+                for _ in range(3):  # nodes return null receipts transiently
+                    try:
+                        rc = vl.rpc("eth_getTransactionReceipt", [tx["hash"]])
+                    except Exception:
+                        rc = None
+                    if rc:
+                        break
+                    _t.sleep(1)
+                if not rc:
+                    continue
+                for lg in rc.get("logs", []):
+                    if is_mint_transfer(lg):
+                        return lg["transactionHash"], int(lg["blockNumber"], 16), lg
+        raise SystemExit(
+            f"Transfer(from=0) log for tokenId {token_id} not recoverable in block {blk} "
+            f"(this RPC prunes old logs); cannot read entry amounts for this position")
+    lg = logs[-1]
+    return lg["transactionHash"], int(lg["blockNumber"], 16), lg
 
 
-def word(h, i):
-    return int(h[2 + i * 64: 2 + (i + 1) * 64], 16)
-
-
-def addr(h):
-    return "0x" + h[-40:]
-
-
-def signed(h):
-    v = word(h, 0)
-    return v - (1 << 256) if v >= (1 << 255) else v
-
-
-def block_ts(url, n):
-    b = rpc(url, "eth_getBlockByNumber", [hex(n), False])
+def block_ts(block):
+    b = vl.rpc("eth_getBlockByNumber", [hex(block), False])
     if b is None:
-        raise RuntimeError("block not returned")
+        raise SystemExit(f"block {block} not returned by rpc")
     return int(b["timestamp"], 16)
 
 
-def block_at(url, ts):
-    head = rpc(url, "eth_blockNumber", [])
-    if head is None:
-        raise RuntimeError("head not returned")
-    lo, hi = 0, int(head, 16)
-    while lo < hi:
-        mid = (lo + hi) // 2
-        if block_ts(url, mid) < ts:
-            lo = mid + 1
-        else:
-            hi = mid
-    return lo
+def block_for_ts(b_anchor, ts_anchor, ts_target, head):
+    """b = b_anchor + (ts_target - ts_anchor); verify with block reads and correct."""
+    b = b_anchor + (ts_target - ts_anchor)
+    if b > head:
+        raise SystemExit(f"target block {b} is past head {head}; reduce --hours")
+    for _ in range(5):
+        ts = block_ts(b)  # verification call
+        if ts == ts_target:
+            return b, ts
+        b += ts_target - ts
+    raise SystemExit(f"1 block = 1 second mapping failed around block {b}")
 
 
-def price_of(sqrt_x96):
-    return (sqrt_x96 / 2 ** 96) ** 2
+def pool_state_raw(pool, tick_lower, tick_upper, block):
+    out = {}
+    out["slot0"] = call(pool, SEL_SLOT0, block)
+    out["fgg0"] = call(pool, SEL_FGG0, block)
+    out["fgg1"] = call(pool, SEL_FGG1, block)
+    out["ticksLower"] = call(pool, SEL_TICKS + vl.enc_int(tick_lower), block)
+    out["ticksUpper"] = call(pool, SEL_TICKS + vl.enc_int(tick_upper), block)
+    return out
 
 
-def tick_to_price(tick):
-    return 1.0001 ** tick
+def parse_state(raw):
+    s0 = vl.words(raw["slot0"])
+    tl = vl.words(raw["ticksLower"])
+    tu = vl.words(raw["ticksUpper"])
+    return {
+        "sqrtPriceX96": s0[0],
+        "tick": vl.s(s0[1], 24),
+        "fgg0": int(raw["fgg0"], 16),
+        "fgg1": int(raw["fgg1"], 16),
+        "fgOutsideLower": (tl[2], tl[3]),
+        "fgOutsideUpper": (tu[2], tu[3]),
+    }
 
 
-def amounts(L, tick_lo, tick_hi, tick_now):
-    """token0/token1 for liquidity L (human units) with tick bounds [lo, hi)."""
-    pa, pb = tick_to_price(tick_lo), tick_to_price(tick_hi)
-    p = tick_to_price(tick_now)
-    if p <= pa:
-        return L * (pb ** 0.5 - pa ** 0.5) / ((pa * pb) ** 0.5), 0.0
-    if p >= pb:
-        return 0.0, L * (pb ** 0.5 - pa ** 0.5)
-    return (L * (pb ** 0.5 - p ** 0.5) / ((p * pb) ** 0.5), L * (p ** 0.5 - pa ** 0.5))
+def price_human(sqrt_p_x96, d0, d1):
+    """P = sqrtPriceX96^2 / 2^192 * 10^d0 / 10^d1 — token1 per token0 (exact)."""
+    return Fraction(sqrt_p_x96 * sqrt_p_x96, 1 << 192) * Fraction(10 ** d0, 10 ** d1)
 
 
-def collect(url, pool, from_ts, to_ts):
-    rows = []
-    t = from_ts
-    while t <= to_ts:
-        b = block_at(url, t)
-        s0 = call(url, pool, SLOT0, hex(b))
-        if not s0 or len(s0) < 10:
-            raise RuntimeError(f"slot0 not returned at block {b}")
-        rows.append({"ts": t, "blk": b,
-                     "sqrtPriceX96": word(s0, 0), "tick": (lambda v: v - (1 << 256) if v >= (1 << 255) else v)(int(s0[2 + 64:2 + 128], 16)),
-                     "liquidity": int(call(url, pool, LIQ, hex(b)) or "0x0", 16),
-                     "fgg0": int(call(url, pool, FGG0, hex(b)) or "0x0", 16),
-                     "fgg1": int(call(url, pool, FGG1, hex(b)), 16)})
-        t += 3600
-        time.sleep(0.25)
-    return rows
+def verify_position(token_id, hours, end_block=None):
+    chain_assert()
+    head = int(vl.rpc("eth_blockNumber", []), 16)
+
+    # ---- 1) position discovery -------------------------------------------
+    mint_tx, b_mint, mint_log = find_mint(token_id, head)
+    rc = vl.rpc("eth_getTransactionReceipt", [mint_tx])
+    if rc is None or rc.get("status") != "0x1":
+        raise SystemExit(f"mint tx {mint_tx} receipt missing or failed")
+    il = None
+    for lg in rc.get("logs", []):
+        t = lg.get("topics") or []
+        if len(t) >= 2 and t[0] == TOPIC_IL and int(t[1], 16) == token_id:
+            il = lg
+            break
+    if il is None:
+        raise SystemExit(f"IncreaseLiquidity(tokenId={token_id}) not in mint tx {mint_tx}")
+    w = vl.words(il["data"])
+    L_entry, a0_raw, a1_raw = w[0], w[1], w[2]  # L = word 0 (not word 1!)
+
+    pos_hex = nfpm_positions_raw(token_id, b_mint)
+    pw = vl.words(pos_hex)
+    token0 = addr_of(pw[2])
+    token1 = addr_of(pw[3])
+    fee = pw[4]
+    tick_lower = vl.s(pw[5], 24)
+    tick_upper = vl.s(pw[6], 24)
+    L_mint = pw[7]
+
+    pool = addr_of(call(FACTORY, SEL_GETPOOL + vl.enc_addr(token0) + vl.enc_addr(token1) + vl.enc_int(fee), b_mint))
+    if int(pool[2:], 16) == 0:
+        raise SystemExit("factory.getPool returned zero address")
+    d0 = int(call(token0, SEL_DECIMALS, b_mint), 16)
+    d1 = int(call(token1, SEL_DECIMALS, b_mint), 16)
+
+    # ---- 2) window: [B_mint, B_end] — pinned --end-block, or B_mint + hours*3600 by 1 block = 1 second ----
+    ts_mint = block_ts(b_mint)
+    if end_block is not None:
+        # explicit end block: use the block number directly, no timestamp re-derivation
+        if end_block <= b_mint:
+            raise SystemExit(f"--end-block {end_block} must be > mint block {b_mint} for position {token_id}")
+        if end_block > head:
+            raise SystemExit(f"--end-block {end_block} is past chain head {head}")
+        b_end = end_block
+        ts_end = block_ts(b_end)
+    else:
+        ts_end_target = ts_mint + hours * 3600
+        b_end, ts_end = block_for_ts(b_mint, ts_mint, ts_end_target, head)
+
+    # ---- 3) state at both blocks ------------------------------------------
+    raw_m = pool_state_raw(pool, tick_lower, tick_upper, b_mint)
+    raw_e = pool_state_raw(pool, tick_lower, tick_upper, b_end)
+    st_m, st_e = parse_state(raw_m), parse_state(raw_e)
+    pos_end_hex = nfpm_positions_raw(token_id, b_end)
+    pe_m = vl.words(pos_end_hex)
+    L_end, fil0, fil1, ow0, ow1 = pe_m[7], pe_m[8], pe_m[9], pe_m[10], pe_m[11]
+
+    def fees_and_amounts(st, L, fil0, fil1, ow0, ow1):
+        inside0 = vl.fee_growth_inside(st["tick"], tick_lower, tick_upper, st["fgg0"],
+                                       st["fgOutsideLower"][0], st["fgOutsideUpper"][0])
+        inside1 = vl.fee_growth_inside(st["tick"], tick_lower, tick_upper, st["fgg1"],
+                                       st["fgOutsideLower"][1], st["fgOutsideUpper"][1])
+        f0 = ow0 + ((inside0 - fil0) % vl.M256) * L // Q128
+        f1 = ow1 + ((inside1 - fil1) % vl.M256) * L // Q128
+        sa = vl.get_sqrt_ratio_at_tick(tick_lower)
+        sb = vl.get_sqrt_ratio_at_tick(tick_upper)
+        x, y = vl.amounts_for_liquidity(st["sqrtPriceX96"], sa, sb, L)
+        return f0, f1, x, y, inside0, inside1
+
+    f0, f1, x, y, inside0_end, inside1_end = fees_and_amounts(st_e, L_end, fil0, fil1, ow0, ow1)
+
+    # ---- 4) prices and values (Fractions; ints for raw amounts) -----------
+    P_start = price_human(st_m["sqrtPriceX96"], d0, d1)
+    P_end = price_human(st_e["sqrtPriceX96"], d0, d1)
+    e0 = Fraction(a0_raw, 10 ** d0)
+    e1 = Fraction(a1_raw, 10 ** d1)
+    V0 = e0 * P_start + e1
+    value_lp = Fraction(x + f0, 10 ** d0) * P_end + Fraction(y + f1, 10 ** d1)
+    value_hodl_entry_mix = e0 * P_end + e1
+    value_hodl_5050 = (V0 / 2) / P_start * P_end + V0 / 2
+
+    pct = lambda a, b: (a / b - 1) * 100
+    ret_lp_vs_entry_pct = pct(value_lp, V0)
+    lp_vs_hodl_pct = pct(value_lp, value_hodl_entry_mix)
+    lp_vs_5050_pct = pct(value_lp, value_hodl_5050)
+
+    # ---- 5) report --------------------------------------------------------
+    raw = {
+        "chain_id": f"{CHAIN_ID}",
+        "mint_log": mint_log,
+        "increase_liquidity_log": il,
+        "nfpm_positions": {str(b_mint): pos_hex, str(b_end): pos_end_hex},
+        "pool": {k: {str(b_mint): raw_m[k], str(b_end): raw_e[k]} for k in raw_m},
+        "decimals": {token0: d0, token1: d1},
+    }
+    data_hash = hashlib.sha256(json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    iso = lambda ts: datetime.fromtimestamp(ts, timezone.utc).isoformat()
+    r6 = lambda fr: round(float(fr), 6)
+    r12 = lambda fr: round(float(fr), 12)
+    caveat_extra = []
+    if L_end != L_entry:
+        caveat_extra.append(
+            f"position liquidity changed in the window (mint IL L={L_entry}, end L={L_end}); "
+            "value_lp uses end-of-window liquidity and fee state")
+
+    report = {
+        "format_version": 1,
+        "chain_id": CHAIN_ID,
+        "pool": pool,
+        "position": {
+            "id": token_id,
+            "tick_lower": tick_lower,
+            "tick_upper": tick_upper,
+            "liquidity": str(L_end),
+            "liquidity_entry": str(L_entry),
+            "token0": token0,
+            "token1": token1,
+            "token0_decimals": d0,
+            "token1_decimals": d1,
+            "fee": fee,
+        },
+        "window": {"from": iso(ts_mint), "to": iso(ts_end), "hours": (round((ts_end - ts_mint) / 3600, 4) if end_block is not None else hours)},
+        "block_range": [b_mint, b_end],
+        "mint_tx": {
+            "hash": mint_tx,
+            "block": b_mint,
+            "timestamp": ts_mint,
+            "increase_liquidity": {
+                "liquidity": L_entry, "amount0": a0_raw, "amount1": a1_raw,
+                "amount0_human": dec_str(e0), "amount1_human": dec_str(e1),
+            },
+        },
+        "data_hash": data_hash,
+        "method_version": METHOD_VERSION,
+        "n": 1,
+        "n_eff": 1.0,
+        "benchmarks": {
+            "hodl_5050_vs_quote": {"median": r6(lp_vs_5050_pct), "p10": r6(lp_vs_5050_pct), "p90": r6(lp_vs_5050_pct)},
+            "hodl_entry_mix_vs_quote": {"median": r6(lp_vs_hodl_pct), "p10": r6(lp_vs_hodl_pct), "p90": r6(lp_vs_hodl_pct)},
+        },
+        "modes": [{
+            "name": "hold_as_is",
+            "median": r6(ret_lp_vs_entry_pct),
+            "p10": r6(ret_lp_vs_entry_pct),
+            "p90": r6(ret_lp_vs_entry_pct),
+        }],
+        "metrics": {
+            "quote_token": token1,
+            "V0": {"value": r12(V0), "exact": dec_str(V0)},
+            "value_lp": {"value": r12(value_lp), "exact": dec_str(value_lp)},
+            "value_hodl_entry_mix": {"value": r12(value_hodl_entry_mix), "exact": dec_str(value_hodl_entry_mix)},
+            "value_hodl_5050": {"value": r12(value_hodl_5050), "exact": dec_str(value_hodl_5050)},
+            "ret_lp_vs_entry_pct": {"value": r12(ret_lp_vs_entry_pct), "exact": dec_str(ret_lp_vs_entry_pct)},
+            "lp_vs_hodl_pct": {"value": r12(lp_vs_hodl_pct), "exact": dec_str(lp_vs_hodl_pct)},
+            "lp_vs_5050_pct": {"value": r12(lp_vs_5050_pct), "exact": dec_str(lp_vs_5050_pct)},
+            "price": {
+                "P_start": {"value": r12(P_start), "exact": dec_str(P_start), "tick": st_m["tick"], "sqrtPriceX96": st_m["sqrtPriceX96"]},
+                "P_end": {"value": r12(P_end), "exact": dec_str(P_end), "tick": st_e["tick"], "sqrtPriceX96": st_e["sqrtPriceX96"]},
+            },
+            "fees_uncollected": {
+                "f0_raw": f0, "f1_raw": f1,
+                "f0": r12(Fraction(f0, 10 ** d0)), "f1": r12(Fraction(f1, 10 ** d1)),
+                "inside0_end": inside0_end, "inside1_end": inside1_end,
+                "feeGrowthInsideLast0": fil0, "feeGrowthInsideLast1": fil1,
+                "tokensOwed0": ow0, "tokensOwed1": ow1,
+            },
+            "principal_end": {
+                "x_raw": x, "y_raw": y,
+                "x": r12(Fraction(x, 10 ** d0)), "y": r12(Fraction(y, 10 ** d1)),
+            },
+        },
+        "calibration": None,
+        "caveats": [
+            "single-window deterministic replay (n=1, n_eff=1); p10/p90 mirror the point value",
+            "fees measured at end block: f_i = tokensOwed_i + (inside_i_now - inside_i_last) mod 2^256 * L // 2^128; not compounded",
+            "value_lp holds the position as-is from entry liquidity; no burns/increases replayed apart from end-block state" ,
+            "quote unit is token1 (human units) via P = sqrtPriceX96^2/2^192 * 10^d0/10^d1",
+            "block mapping assumes Celo L2 1 block = 1 second, verified against block timestamps at both window ends",
+        ] + caveat_extra,
+    }
+    return report
+
+
+# ---------------- minimal report-v1 schema validation (stdlib only) ----------------
+
+def _type_ok(inst, t):
+    if t == "object":
+        return isinstance(inst, dict)
+    if t == "array":
+        return isinstance(inst, list)
+    if t == "string":
+        return isinstance(inst, str)
+    if t == "integer":
+        return isinstance(inst, int) and not isinstance(inst, bool)
+    if t == "number":
+        return isinstance(inst, (int, float)) and not isinstance(inst, bool)
+    if t == "boolean":
+        return isinstance(inst, bool)
+    if t == "null":
+        return inst is None
+    return True
+
+
+def _validate(inst, sch, path, errs):
+    t = sch.get("type")
+    if isinstance(t, list):
+        if not any(_type_ok(inst, x) for x in t):
+            errs.append(f"{path}: type {type(inst).__name__} not in {t}")
+            return
+    elif isinstance(t, str) and not _type_ok(inst, t):
+        errs.append(f"{path}: expected {t}, got {type(inst).__name__}")
+        return
+    if "const" in sch and inst != sch["const"]:
+        errs.append(f"{path}: {inst!r} != const {sch['const']!r}")
+    if "pattern" in sch and isinstance(inst, str) and not re.search(sch["pattern"], inst):
+        errs.append(f"{path}: {inst!r} does not match {sch['pattern']}")
+    if "minimum" in sch and isinstance(inst, (int, float)) and not isinstance(inst, bool):
+        if inst < sch["minimum"]:
+            errs.append(f"{path}: {inst} < minimum {sch['minimum']}")
+    if isinstance(inst, dict):
+        for k in sch.get("required", []):
+            if k not in inst:
+                errs.append(f"{path}: missing required '{k}'")
+        for k, sub in sch.get("properties", {}).items():
+            if k in inst:
+                _validate(inst[k], sub, f"{path}.{k}", errs)
+    if isinstance(inst, list):
+        if "minItems" in sch and len(inst) < sch["minItems"]:
+            errs.append(f"{path}: {len(inst)} items < minItems {sch['minItems']}")
+        if "maxItems" in sch and len(inst) > sch["maxItems"]:
+            errs.append(f"{path}: {len(inst)} items > maxItems {sch['maxItems']}")
+        if "items" in sch:
+            for i, item in enumerate(inst):
+                _validate(item, sch["items"], f"{path}[{i}]", errs)
+
+
+def validate_file(path):
+    here = os.path.dirname(os.path.abspath(__file__))
+    schema_path = os.path.join(here, "report.schema.json")
+    schema = json.load(open(schema_path))
+    report = json.load(open(path))
+    errs = []
+    _validate(report, schema, "$", errs)
+    if errs:
+        for e in errs:
+            print(f"FAIL: {e}", file=sys.stderr)
+        return 1
+    print(f"OK: {path} matches report-v1")
+    return 0
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description="LP position verification (Celo, spec §1.2)")
     ap.add_argument("--position", type=int, help="UniswapV3 NFPM tokenId on Celo")
-    ap.add_argument("--mint-tx", help="mint tx hash (position params source; this NFPM deploy has a non-vanilla positions() ABI)")
-    ap.add_argument("--days", type=int, default=14)
-    ap.add_argument("--rpc", default="https://forno.celo.org")
-    ap.add_argument("--validate", help="validate a report JSON against schemas/report-v1")
+    ap.add_argument("--hours", type=int, default=24, help="window length in hours (default 24)")
+    ap.add_argument("--end-block", type=int, default=None,
+                    help="pin the window end to exactly this block (overrides --hours)")
+    ap.add_argument("--validate", help="validate a report JSON against scripts/report.schema.json")
     args = ap.parse_args()
 
     if args.validate:
-        try:
-            import jsonschema
-        except ImportError:
-            print("pip install jsonschema (validator dependency)", file=sys.stderr)
-            return 2
-        schema = json.load(open("scripts/report.schema.json"))
-        report = json.load(open(args.validate))
-        jsonschema.validate(report, schema)
-        print(f"OK: {args.validate} matches report-v1")
-        return 0
+        return validate_file(args.validate)
+    if not args.position:
+        ap.error("--position <tokenId> required (or --validate <file>)")
+    if args.end_block is None and args.hours < 1:
+        ap.error("--hours must be >= 1")
 
-    if not args.position or not args.mint_tx:
-        ap.error("--position <tokenId> --mint-tx <hash> required (or --validate <file>)")
-
-    # 1) position params from the mint transaction (this Celo NFPM deploy lacks the vanilla
-    #    positions(uint256) selector; mint input + IncreaseLiquidity event carry the same data)
-    tix = args.position
-    tx = rpc(args.rpc, "eth_getTransactionByHash", [args.mint_tx])
-    if tx is None:
-        raise SystemExit("tx not found on RPC (check --mint-tx / provider)")
-    inp = tx["input"][2:]
-    sw = lambda i: int(inp[8 + i * 64: 8 + (i + 1) * 64], 16)
-    token0, token1 = "0x" + inp[8 + 24: 8 + 64], "0x" + inp[8 + 64 + 24: 8 + 128]
-    sgn = lambda v: v - (1 << 256) if v >= (1 << 255) else v
-    fee, tick_lo, tick_hi = sw(2), sgn(sw(3)), sgn(sw(4))
-    rc = rpc(args.rpc, "eth_getTransactionReceipt", [args.mint_tx])
-    if rc is None:
-        raise SystemExit("receipt not returned (provider hiccup); retry")
-    L = 0
-    for lg in rc.get("logs", []):
-        if lg.get("topics") and lg["topics"][0].startswith("0x3067048b")                 and int(lg["topics"][1], 16) == tix:
-            L = int(lg["data"][2 + 64: 2 + 128], 16)
-    if not L:
-        raise SystemExit("IncreaseLiquidity not found in the mint tx for this tokenId")
-    pool_hex = call(args.rpc, FACTORY, GETPOOL + token0[2:].rjust(64, "0") + token1[2:].rjust(64, "0") + f"{fee:064x}")
-    if not pool_hex or int(pool_hex, 16) == 0:
-        raise SystemExit("pool not found for this token pair/fee")
-    pool = addr(pool_hex)
-
-    # 2) window + dataset
-    to_ts = int(time.time()) // 3600 * 3600
-    from_ts = to_ts - args.days * 86400
-    rows = collect(args.rpc, pool, from_ts, to_ts)
-    data_hash = hashlib.sha256(
-        ("\n".join(json.dumps(r, sort_keys=True) for r in rows)).encode()).hexdigest()
-
-    # decimals: assume 18/18 for CELO/USDm pairs on Celo (asserted by price sanity below)
-    L_h = L / 1e18
-    # 3) hold replay of the ACTUAL position ticks/liquidity
-    entry, last = rows[0], rows[-1]
-    in_range = lambda r: tick_lo <= r["tick"] < tick_hi
-    fees0 = sum((rows[i]["fgg0"] - rows[i - 1]["fgg0"]) / 2 ** 128 for i in range(1, len(rows)) if in_range(rows[i - 1]))
-    fees1 = sum((rows[i]["fgg1"] - rows[i - 1]["fgg1"]) / 2 ** 128 for i in range(1, len(rows)) if in_range(rows[i - 1]))
-    pos_fees0, pos_fees1 = L_h * fees0, L_h * fees1
-    p0, p1 = price_of(entry["sqrtPriceX96"]), price_of(last["sqrtPriceX96"])
-    t0e, t1e = amounts(L_h, tick_lo, tick_hi, entry["tick"])
-    t0l, t1l = amounts(L_h, tick_lo, tick_hi, last["tick"])
-    entry_usd = t0e * p0 + t1e * p0
-    final_usd = t0l * p1 + t1l * p1 + (pos_fees0 * p1 + pos_fees1)
-    hodl = (t0e * p1 + t1e * p0) / entry_usd - 1 if entry_usd else 0.0
-
-    report = {
-        "format_version": 1, "chain_id": CHAIN_ID, "pool": pool,
-        "position": {"id": tix, "tick_lower": tick_lo, "tick_upper": tick_hi, "liquidity": str(L)},
-        "window": {"from": datetime.fromtimestamp(from_ts, timezone.utc).isoformat(),
-                   "to": datetime.fromtimestamp(to_ts, timezone.utc).isoformat()},
-        "block_range": [rows[0]["blk"], rows[-1]["blk"]],
-        "data_hash": data_hash, "method_version": METHOD,
-        "n": len(rows), "n_eff": 1.0,
-        "benchmarks": {"hodl_5050_vs_quote": {"median": hodl}},
-        "modes": [{"name": "hold_as_is",
-                   "median": final_usd / entry_usd - 1 if entry_usd else 0.0,
-                   "p10": 0.0, "p90": 0.0}],
-        "calibration": None,
-        "caveats": [
-            "hold replay of the position's current liquidity and ticks; mints/burns inside the window are not replayed",
-            "fees = position share of ΔfeeGrowthGlobal while in range (global, no tick-crossing correction)",
-            "18/18 decimals assumed for CELO/USDm; single window, n_eff = 1",
-        ],
-    }
+    report = verify_position(args.position, args.hours, end_block=args.end_block)
     print(json.dumps(report, indent=1))
     return 0
 

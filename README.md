@@ -16,6 +16,8 @@ seed 113, 113 random entry points, 14/30-day horizons.
 | `scripts/aero_rgg_backfill.py` | Backfill of rewardGrowthGlobal for the AERO pool |
 | `scripts/celo_fetch.py` | Hourly collector for UniswapV3 pools on Celo mainnet (forno archive RPC): {sqrtPriceX96, tick, liquidity, feeGrowthGlobal0/1} |
 | `scripts/celo_report.py` | Verification report compute for a Celo pool (widths ±2–30%, hold vs re-range, 113 seeded starts) |
+| `scripts/verify.py` | Single-position verification CLI: reads any UniswapV3 NFPM tokenId on Celo from on-chain data (no keys) and emits a report-v1 JSON (`--position 202630 --hours 24`) |
+| `scripts/verify_lib.py` | Integer ports of TickMath / LiquidityAmounts / feeGrowthInside / keccak256 (stdlib-only, contract-exact rounding) |
 | `reports/*.md` | Published verification reports (numbers verbatim from the JSON outputs) |
 
 ## Calibration against live positions
@@ -46,12 +48,27 @@ Any agent can emit a compatible report; the format is designed to be comparable 
 
 `journals/claim_journal.md` — every reward claim of the live positions backing the calibration,
 with tx hashes and amounts. Anyone can verify each row in a block explorer.
+Corrections to published numbers are logged, never silently overwritten: `docs/ERRATA.md`.
+
+## Agent identity (on-chain)
+
+The harness agent is registered in two independent on-chain registries on Celo, both controlled
+by the same wallet (`eip155:42220:0x3278B8911F948d0B2F83Ca931060cD253Be29F4C` — also the pilot
+position wallet):
+
+| Registry | agentId | tx |
+|---|---|---|
+| ERC-8004 canonical IdentityRegistry `eip155:42220:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` | **9890** | `0xb27d257f06f8266b7af534aa151df96cec2b50647a506d2f2cae7d7e3d5d66e9` (block 79865191, 2026-10-12 00:45:49Z) |
+| Self Agent ID registry `eip155:42220:0xaC3DF9ABf80d0F5c020C06B04Cced27763355944` | **193** | registered 2026-10-10 |
+
+The ERC-8004 `agentURI` resolves to [`docs/agent.json`](docs/agent.json) (served by GitHub Pages),
+which back-links both registrations.
 
 ## Data integrity
 
 | File | sha256 (first 16) |
 |---|---|
-| data/celo_pool_2026-10-10.json | 0dc811b7bce69fef |
+| data/celo_pool_2026-10-10.json | 15ae0939e82d3200 |
 | data/weth_rerange_modes_2026-10-09.json | 3d584f2d58abe6cd |
 | data/aero_rerange_modes_2026-10-10.json | 9cf912db41e9dde6 |
 
@@ -65,6 +82,9 @@ RPC, deterministic window) and re-run `scripts/celo_report.py` to match the hash
 # Celo pool measurement (data first, then compute)
 python3 scripts/celo_fetch.py --days 30
 python3 scripts/celo_report.py
+
+# Single-position verification (any live UniswapV3 position on Celo, public RPC, no keys)
+python3 scripts/verify.py --position 202630 --hours 24
 ```
 
 Deterministic: fixed seed (113), no network in the compute step, no LLM anywhere in the loop.
