@@ -51,10 +51,11 @@ with tx hashes and amounts. Anyone can verify each row in a block explorer.
 
 | File | sha256 (first 16) |
 |---|---|
-| data/celo_pool_2026-10-10.json | 84d67a76d43ffd6c |
-| data/weth_rerange_modes_2026-10-09.json | ff676c615af15768 |
-| data/aero_rerange_modes_2026-10-10.json | dba1a56d58d1cf84 |
+| data/celo_pool_2026-10-10.json | 0dc811b7bce69fef |
+| data/weth_rerange_modes_2026-10-09.json | 3d584f2d58abe6cd |
+| data/aero_rerange_modes_2026-10-10.json | 9cf912db41e9dde6 |
 
+Hashes computed on LF-normalized git blobs: .
 Rebuild the Celo dataset with `scripts/celo_fetch.py --from <ISO> --to <ISO>` (public archive
 RPC, deterministic window) and re-run `scripts/celo_report.py` to match the hash above.
 
