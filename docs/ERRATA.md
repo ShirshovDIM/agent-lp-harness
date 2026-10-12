@@ -21,6 +21,7 @@ This page documents corrections to published reports, calibration numbers, and c
 | 2026-10-12 | celo_report L_eff: `L_pool − L_own` → `L_pool` (recomputation in progress) | The replayed position is hypothetical: it never existed in the hourly `liquidity()` samples, and at a re-range it is out of range (not part of active L). Subtracting it fired the 60% cap 338× and distorted medians (external audit review of 9a3ca5b; spec §2 clarified) | pending | external audit |
 | 2026-10-12 | README data hashes: computed on LF-normalized git blobs; hash command documented | CRLF-affected hashes failed verification on Linux | 03c8fb6 | external audit |
 | 2026-10-12 | Repository history rewritten: non-public working material (internal notes, local paths, build caches) removed from all past commits | Public history should contain only the harness, its data and reports. Numbers and data files are unchanged; commit hashes changed (this table uses the new hashes) | history rewrite | author |
+| 2026-10-12 | aero data JSON anchor numbers updated to the final calibration: claimed 1.0735 → 1.084257, ratio 1.0066 → 0.9966 | The data file still carried superseded intermediate values while README and the report carried the final ones; data hash updated in README | this commit | external audit |
 
 ## Principle
 

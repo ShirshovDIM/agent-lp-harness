@@ -70,7 +70,7 @@ which back-links both registrations.
 |---|---|
 | data/celo_pool_2026-10-10.json | 15ae0939e82d3200 |
 | data/weth_rerange_modes_2026-10-09.json | 3d584f2d58abe6cd |
-| data/aero_rerange_modes_2026-10-10.json | 9cf912db41e9dde6 |
+| data/aero_rerange_modes_2026-10-10.json | af622de2a9b2b635 |
 
 Hashes computed on LF-normalized git blobs: .
 Rebuild the Celo dataset with `scripts/celo_fetch.py --from <ISO> --to <ISO>` (public archive
