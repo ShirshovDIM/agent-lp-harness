@@ -28,6 +28,19 @@ USAGE:
 --end-block B pins the window end to exactly block B (overrides --hours); window.hours
 is then reported as (ts_end - ts_mint)/3600 from the block timestamps.
 
+Window events (spec §1.2): NFPM IncreaseLiquidity / DecreaseLiquidity / Collect logs with
+topic1 == tokenId are pulled via eth_getLogs over [B_mint+1, B_end] in <=5000-block windows.
+Collect in window = earned value: amounts are added to value_lp ("N Collect event(s) applied").
+Any IncreaseLiquidity/DecreaseLiquidity in window sets position_modified_in_window=true and
+replaces modes[].median/p10/p90 by null with a `reason` (as-is replay not measurable); the
+report stays valid and the exit code stays 0.
+
+Burn cut (spec §2): if positions(tokenId) reverts ("Invalid token ID") at the window end of an
+--hours window, the burn block is found by binary search on positions() (~log2(head) eth_calls)
+and the window end is clamped to the last block where the position still exists;
+window_clamped_to_burn=true plus burn_block/burn_ts are reported. A pinned --end-block at/after
+the burn block is an explicit error instead.
+
 Only stdlib + verify_lib (read-only RPC, whitelisted methods, retries handled there).
 """
 import argparse
@@ -45,7 +58,7 @@ import verify_lib as vl  # noqa: E402
 NFPM = "0x3d79EdAaBC0EaB6F08ED885C05Fc0B014290D95A"
 FACTORY = "0xAfE208a311B21f13EF87E33A90049fC17A7acDEc"
 CHAIN_ID = 42220
-METHOD_VERSION = "verify.py/2.0 (spec verify_spec_2026-10-12.md §1.2: IL-event entry, NFPM positions, feeGrowthInside fees, Fraction arithmetic)"
+METHOD_VERSION = "verify.py/2.1 (spec verify_spec_2026-10-12.md §1.2: IL-event entry, NFPM positions, feeGrowthInside fees, Fraction arithmetic; window events IL/DL/Collect + burn window cut)"
 
 Q128 = 1 << 128
 GETLOGS_MAX_RANGE = 5000  # forno eth_getLogs limit
@@ -59,6 +72,10 @@ SEL_FGG0 = vl.sel("feeGrowthGlobal0X128()")
 SEL_FGG1 = vl.sel("feeGrowthGlobal1X128()")
 TOPIC_TRANSFER = vl.topic("Transfer(address,address,uint256)")
 TOPIC_IL = vl.topic("IncreaseLiquidity(uint256,uint128,uint256,uint256)")  # 0x3067048b...
+TOPIC_DL = vl.topic("DecreaseLiquidity(uint256,uint128,uint256,uint256)")  # 0x26f6a048...
+TOPIC_COLLECT = vl.topic("Collect(uint256,address,uint256,uint256)")       # 0x40d0efd1...
+# position-lifecycle events with topic1 == tokenId (OR-filter for one getLogs per window)
+TOPICS_POSITION_EVENTS = [TOPIC_IL, TOPIC_DL, TOPIC_COLLECT]
 
 # ---------------- helpers ----------------
 
@@ -114,12 +131,25 @@ def nfpm_positions_ok(token_id, block):
 
 
 def find_mint(token_id, head):
-    """Mint tx/block from Transfer(from=0, topic3=tokenId) on the NFPM.
+    """Mint tx/block from Transfer(from=0, topic3=tokenId) on the NFPM (spec §1.5).
 
-    A full-range getLogs is impossible (5000-block limit), so first bracket the mint
-    block with a binary search on NFPM.positions(tokenId) existence, then pull the
-    Transfer log from that single block. Falls back to a backward chunked getLogs
-    scan if the token no longer exists (burned position).
+    A single positions(tokenId) probe at head SELECTS the discovery class — it must
+    never gate discovery:
+      * positions() succeeds at head (live token): binary search of the first block
+        where positions() succeeds == B_mint (~log2(head) eth_calls; "ok" is monotone
+        from B_mint up to head);
+      * positions() reverts at head (burned token): backward chunked getLogs scan for
+        the mint Transfer(from=0, topic3=tokenId) log over the last GETLOGS_MAX_RANGE*200
+        blocks (5000-block windows, forno range limit). If no log is indexed there
+        (position minted before the probe window, or unusual), fall back to the same
+        binary search of the first block where positions() succeeds.
+
+    positions(tokenId) exists exactly on [B_mint, B_burn-1] (B_burn = burn block, possibly
+    past head), so the binary search pins B_mint only while its probes stay below B_burn:
+    a probe landing at/after B_burn converges the search past the mint interval and the
+    token looks "nonexistent" — burned tokens therefore go through the log scan FIRST.
+    The Transfer(from=0) log is then read from the mint block; if the RPC has not indexed
+    it, the block's tx receipts are scanned as a fallback.
     """
     log_topics = [TOPIC_TRANSFER, enc32(0), None, enc32(token_id)]
 
@@ -136,9 +166,10 @@ def find_mint(token_id, head):
                 and t[0] == TOPIC_TRANSFER and t[1] == enc32(0)
                 and t[3] == enc32(token_id))
 
-    blk = None
-    if nfpm_positions_ok(token_id, head):
-        # live token: binary-search the first block where positions(tokenId) succeeds
+    def bisect_first_existing():
+        """First block where positions(tokenId) succeeds == B_mint, or None if positions()
+        reverts at every probed block <= head (wrong tokenId, or the search stepped past
+        the burn block of an old burned token)."""
         lo, hi = 0, head
         while lo < hi:
             mid = (lo + hi) // 2
@@ -146,24 +177,13 @@ def find_mint(token_id, head):
                 hi = mid
             else:
                 lo = mid + 1
-        blk = lo
-    else:
-        # burned token: scan backwards for the mint log in max-range chunks
-        a = head
-        while a > 0 and a > head - GETLOGS_MAX_RANGE * 200:
-            b0 = max(0, a - GETLOGS_MAX_RANGE)
-            logs = getlogs(b0, a)
-            hit = [lg for lg in logs if is_mint_transfer(lg)]
-            if hit:
-                lg = hit[-1]
-                return lg["transactionHash"], int(lg["blockNumber"], 16), lg
-            a = b0 - 1
-        raise SystemExit(
-            f"tokenId {token_id} does not exist at head (burned?) and its mint log is not "
-            f"indexed within {GETLOGS_MAX_RANGE * 200} blocks below head")
+        return lo if nfpm_positions_ok(token_id, lo) else None
 
-    logs = [lg for lg in getlogs(blk, blk) if is_mint_transfer(lg)]
-    if not logs:
+    def mint_log_from_block(blk):
+        """Transfer(from=0) log of the mint read from block blk; receipt scan fallback."""
+        logs = [lg for lg in getlogs(blk, blk) if is_mint_transfer(lg)]
+        if logs:
+            return logs[-1]
         # log index may lag the state archive: scan the block's tx receipts instead
         blkfull = vl.rpc("eth_getBlockByNumber", [hex(blk), True])
         if blkfull:
@@ -182,12 +202,126 @@ def find_mint(token_id, head):
                     continue
                 for lg in rc.get("logs", []):
                     if is_mint_transfer(lg):
-                        return lg["transactionHash"], int(lg["blockNumber"], 16), lg
+                        return lg
+        return None
+
+    if nfpm_positions_ok(token_id, head):
+        # live token: binary-search the first block where positions(tokenId) succeeds
+        blk = bisect_first_existing()
+        if blk is None:
+            raise SystemExit(
+                f"positions(tokenId={token_id}) succeeded at head {head} but the "
+                "mint-block binary search failed (transient RPC inconsistency); rerun")
+    else:
+        # burned token: the mint-log scan comes FIRST (spec §1.5 discovery classes) —
+        # positions() reverts at head, so an unconditional binary search could never
+        # be trusted here; scan backwards for the mint log in max-range chunks
+        a = head
+        while a > 0 and a > head - GETLOGS_MAX_RANGE * 200:
+            b0 = max(0, a - GETLOGS_MAX_RANGE)
+            hit = [lg for lg in getlogs(b0, a) if is_mint_transfer(lg)]
+            if hit:
+                lg = hit[-1]
+                return lg["transactionHash"], int(lg["blockNumber"], 16), lg
+            a = b0 - 1
+        # no mint log indexed within the probe window: fall back to the binary search
+        # (pre-probe mints; works while its probes stay below the burn block)
+        blk = bisect_first_existing()
+        if blk is None:
+            raise SystemExit(
+                f"tokenId {token_id} does not exist on the NFPM at any block <= head {head} "
+                "(positions() reverts everywhere; wrong tokenId?) and no Transfer(from=0) "
+                f"log is indexed within {GETLOGS_MAX_RANGE * 200} blocks below head")
+
+    if blk > 0 and nfpm_positions_ok(token_id, blk - 1):
+        raise SystemExit(
+            f"positions(tokenId={token_id}) already succeeds below block {blk}; "
+            "inconsistent archive state, cannot pin the mint block")
+    lg = mint_log_from_block(blk)
+    if lg is None:
         raise SystemExit(
             f"Transfer(from=0) log for tokenId {token_id} not recoverable in block {blk} "
             f"(this RPC prunes old logs); cannot read entry amounts for this position")
-    lg = logs[-1]
     return lg["transactionHash"], int(lg["blockNumber"], 16), lg
+
+
+def getlogs_chunked(a0, b0, topics):
+    """eth_getLogs over [a0, b0] inclusive, split into windows of <=5000 blocks (forno limit)."""
+    out = []
+    a = a0
+    while a <= b0:
+        b = min(a + GETLOGS_MAX_RANGE - 1, b0)
+        p = {"address": NFPM, "fromBlock": hex(a), "toBlock": hex(b), "topics": topics}
+        try:
+            out.extend(vl.rpc("eth_getLogs", [p]))
+        except ValueError:
+            pass  # deterministic http400 for this window: no logs to return
+        a = b + 1
+    return out
+
+
+def window_position_events(token_id, b_from, b_to):
+    """NFPM position-lifecycle events with topic1 == tokenId over [b_from, b_to] inclusive.
+
+    Returns {"increase": [...], "decrease": [...], "collect": [...]}; each item carries the
+    block, the decoded data words (liquidity for IL/DL, recipient for Collect, amounts) and
+    the raw log. Data layouts (non-indexed words):
+      IncreaseLiquidity(tokenId, liquidity, amount0, amount1)
+      DecreaseLiquidity(tokenId, liquidity, amount0, amount1)
+      Collect(tokenId, recipient, amount0, amount1)
+    """
+    ev = {"increase": [], "decrease": [], "collect": []}
+    if b_to < b_from:
+        return ev
+    tid_topic = enc32(token_id)
+    for lg in getlogs_chunked(b_from, b_to, [TOPICS_POSITION_EVENTS, tid_topic]):
+        t = lg.get("topics") or []
+        if len(t) < 2 or t[1] != tid_topic:
+            continue
+        w = vl.words(lg.get("data")) if lg.get("data") not in (None, "0x") else []
+        if len(w) < 3:
+            continue
+        blk = int(lg["blockNumber"], 16)
+        if t[0] == TOPIC_IL:
+            ev["increase"].append({"block": blk, "liquidity": w[0], "amount0": w[1],
+                                   "amount1": w[2], "log": lg})
+        elif t[0] == TOPIC_DL:
+            ev["decrease"].append({"block": blk, "liquidity": w[0], "amount0": w[1],
+                                   "amount1": w[2], "log": lg})
+        elif t[0] == TOPIC_COLLECT:
+            ev["collect"].append({"block": blk, "recipient": addr_of(w[0]), "amount0": w[1],
+                                  "amount1": w[2], "log": lg})
+    return ev
+
+
+def nfpm_positions_raw_or_none(token_id, block):
+    """positions(tokenId) raw return, or None if it reverts / returns empty (token gone)."""
+    try:
+        r = nfpm_positions_raw(token_id, block)
+        return r if r and r != "0x" else None
+    except Exception:
+        return None
+
+
+def find_burn_block(token_id, b_mint, head):
+    """First block above the mint where positions(tokenId) reverts == the burn block.
+
+    positions() exists on [B_mint, B_burn-1] and reverts on [B_burn, ...], so a binary search
+    over [B_mint+1, head] (~log2 eth_calls) pins B_burn. The caller must know positions()
+    reverts somewhere <= head. Returns B_burn; the last existing block is B_burn - 1.
+    """
+    lo, hi = b_mint + 1, head
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if nfpm_positions_ok(token_id, mid):
+            lo = mid + 1
+        else:
+            hi = mid
+    if nfpm_positions_ok(token_id, lo):
+        raise SystemExit(
+            f"inconsistent positions(tokenId={token_id}) results around block {lo} "
+            "(transient RPC failure during the burn-block search); rerun")
+    return lo
 
 
 def block_ts(block):
@@ -288,11 +422,34 @@ def verify_position(token_id, hours, end_block=None):
         ts_end_target = ts_mint + hours * 3600
         b_end, ts_end = block_for_ts(b_mint, ts_mint, ts_end_target, head)
 
+    # ---- 2b) burn window cut (spec §2) --------------------------------------
+    # If positions(tokenId) reverts at the window end ("Invalid token ID"), the token was burned
+    # during the window: find the burn block and clamp the end to the last existing block, so an
+    # --hours window on a burned position measures [B_mint, B_burn-1] instead of crashing.
+    window_clamped_to_burn = False
+    burn_block = burn_ts = None
+    pos_end_hex = nfpm_positions_raw_or_none(token_id, b_end)
+    if pos_end_hex is None:
+        b_burn = find_burn_block(token_id, b_mint, head)
+        if b_burn - 1 <= b_mint:
+            raise SystemExit(
+                f"position {token_id} was burned in its mint block {b_mint} (gone from block "
+                f"{b_burn}); no measurable window")
+        if end_block is not None:
+            raise SystemExit(
+                f"--end-block {end_block} is at/after the burn block {b_burn} of position "
+                f"{token_id}; pin a block < {b_burn} or use --hours")
+        b_end = b_burn - 1
+        ts_end = block_ts(b_end)
+        burn_block = b_burn
+        burn_ts = block_ts(b_burn)
+        window_clamped_to_burn = True
+        pos_end_hex = nfpm_positions_raw(token_id, b_end)
+
     # ---- 3) state at both blocks ------------------------------------------
     raw_m = pool_state_raw(pool, tick_lower, tick_upper, b_mint)
     raw_e = pool_state_raw(pool, tick_lower, tick_upper, b_end)
     st_m, st_e = parse_state(raw_m), parse_state(raw_e)
-    pos_end_hex = nfpm_positions_raw(token_id, b_end)
     pe_m = vl.words(pos_end_hex)
     L_end, fil0, fil1, ow0, ow1 = pe_m[7], pe_m[8], pe_m[9], pe_m[10], pe_m[11]
 
@@ -310,13 +467,23 @@ def verify_position(token_id, hours, end_block=None):
 
     f0, f1, x, y, inside0_end, inside1_end = fees_and_amounts(st_e, L_end, fil0, fil1, ow0, ow1)
 
+    # ---- 3b) NFPM window events over (B_mint, B_end] (spec §1.2) ------------
+    # Collect = earned value (amounts added to value_lp below); IncreaseLiquidity/DecreaseLiquidity
+    # = the as-is replay assumption is broken -> position_modified_in_window, median null.
+    ev = window_position_events(token_id, b_mint + 1, b_end)
+    n_increase, n_decrease, n_collect = len(ev["increase"]), len(ev["decrease"]), len(ev["collect"])
+    n_modified = n_increase + n_decrease
+    position_modified_in_window = n_modified > 0
+    collect0 = sum(e["amount0"] for e in ev["collect"])
+    collect1 = sum(e["amount1"] for e in ev["collect"])
+
     # ---- 4) prices and values (Fractions; ints for raw amounts) -----------
     P_start = price_human(st_m["sqrtPriceX96"], d0, d1)
     P_end = price_human(st_e["sqrtPriceX96"], d0, d1)
     e0 = Fraction(a0_raw, 10 ** d0)
     e1 = Fraction(a1_raw, 10 ** d1)
     V0 = e0 * P_start + e1
-    value_lp = Fraction(x + f0, 10 ** d0) * P_end + Fraction(y + f1, 10 ** d1)
+    value_lp = Fraction(x + f0 + collect0, 10 ** d0) * P_end + Fraction(y + f1 + collect1, 10 ** d1)
     value_hodl_entry_mix = e0 * P_end + e1
     value_hodl_5050 = (V0 / 2) / P_start * P_end + V0 / 2
 
@@ -340,6 +507,18 @@ def verify_position(token_id, hours, end_block=None):
     r6 = lambda fr: round(float(fr), 6)
     r12 = lambda fr: round(float(fr), 12)
     caveat_extra = []
+    if n_collect:
+        caveat_extra.append(
+            f"{n_collect} Collect event(s) applied; collected fees counted as earned value "
+            "(token0/token1 amounts valued at P_end)")
+    if window_clamped_to_burn:
+        caveat_extra.append(
+            f"position burned during the window: window end clamped to block {b_end} (last block "
+            f"before burn block {burn_block}); measured {round((ts_end - ts_mint) / 3600, 4)}h "
+            f"of the requested window")
+    if position_modified_in_window:
+        caveat_extra.append(
+            f"position modified in window: {n_modified} events; segment replay not in this version")
     if L_end != L_entry:
         caveat_extra.append(
             f"position liquidity changed in the window (mint IL L={L_entry}, end L={L_end}); "
@@ -363,6 +542,10 @@ def verify_position(token_id, hours, end_block=None):
         },
         "window": {"from": iso(ts_mint), "to": iso(ts_end), "hours": (round((ts_end - ts_mint) / 3600, 4) if end_block is not None else hours)},
         "block_range": [b_mint, b_end],
+        "position_modified_in_window": position_modified_in_window,
+        "window_clamped_to_burn": window_clamped_to_burn,
+        "burn_block": burn_block,
+        "burn_ts": burn_ts,
         "mint_tx": {
             "hash": mint_tx,
             "block": b_mint,
@@ -382,9 +565,12 @@ def verify_position(token_id, hours, end_block=None):
         },
         "modes": [{
             "name": "hold_as_is",
-            "median": r6(ret_lp_vs_entry_pct),
-            "p10": r6(ret_lp_vs_entry_pct),
-            "p90": r6(ret_lp_vs_entry_pct),
+            "median": None if position_modified_in_window else r6(ret_lp_vs_entry_pct),
+            "p10": None if position_modified_in_window else r6(ret_lp_vs_entry_pct),
+            "p90": None if position_modified_in_window else r6(ret_lp_vs_entry_pct),
+            **({} if not position_modified_in_window else {
+                "reason": f"position modified in window: {n_modified} events; "
+                          "segment replay not in this version"}),
         }],
         "metrics": {
             "quote_token": token1,
@@ -409,6 +595,12 @@ def verify_position(token_id, hours, end_block=None):
             "principal_end": {
                 "x_raw": x, "y_raw": y,
                 "x": r12(Fraction(x, 10 ** d0)), "y": r12(Fraction(y, 10 ** d1)),
+            },
+            "fees_collected": {
+                "events": n_collect,
+                "amount0_raw": collect0, "amount1_raw": collect1,
+                "amount0": r12(Fraction(collect0, 10 ** d0)),
+                "amount1": r12(Fraction(collect1, 10 ** d1)),
             },
         },
         "calibration": None,
